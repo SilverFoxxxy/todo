@@ -229,6 +229,9 @@ async function initCloudSync() {
       isSignedIn.value = true;
       cloudEnabled.value = true;
       await fullSyncFromCloud();
+      if (cloudEnabled.value) {
+        startPolling();
+      }
     } else {
       // Можно попытаться тихий вход, но пока оставим
     }
@@ -247,11 +250,13 @@ async function enableCloudSync() {
   cloudEnabled.value = true;
   console.log('✅ Вход выполнен, начинаю синхронизацию');
   await fullSyncFromCloud();
+  startPolling();
 }
 
 // Выход из облачной синхронизации
 function disableCloudSync() {
   cloudEnabled.value = false;
+  stopPolling();
   signOut();
   // Очищаем кэш ID файлов
   for (const key in driveFileIds) {
@@ -462,6 +467,44 @@ async function syncAllLocalWeeks() {
 
 // Первоначальная загрузка локальных данных
 loadWeek(currentMonday.value);
+
+let pollingTimer = null;
+const POLL_INTERVAL = 5000; // 5 секунд
+
+function startPolling() {
+  if (pollingTimer) return;
+  pollingTimer = setInterval(async () => {
+    if (!cloudEnabled.value || !isSignedIn.value) return;
+    if (document.visibilityState === 'hidden') return; // не опрашиваем в фоне
+    console.log('🔄 Периодическая проверка облака…');
+    try {
+      const files = await listWeekFiles();
+      const cloudModifiedMap = loadCloudModifiedMap();
+      let hasChanges = false;
+      for (const file of files) {
+        const key = file.name.replace('.json', '');
+        const cloudModified = new Date(file.modifiedTime).getTime();
+        if (cloudModifiedMap[key] !== cloudModified) {
+          hasChanges = true;
+          break;
+        }
+      }
+      if (hasChanges) {
+        console.log('🔁 Обнаружены изменения в облаке, запускаю синхронизацию');
+        await fullSyncFromCloud();
+      }
+    } catch (e) {
+      console.warn('Ошибка при периодической проверке облака:', e);
+    }
+  }, POLL_INTERVAL);
+}
+
+function stopPolling() {
+  if (pollingTimer) {
+    clearInterval(pollingTimer);
+    pollingTimer = null;
+  }
+}
 
 export function useTodoStore() {
   return {
