@@ -1,0 +1,36 @@
+# Зависимости
+node_modules/
+.pnp/
+.pnp.js
+
+# Сборка
+dist/
+
+# Логи
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Переменные окружения
+.env
+.env.local
+.env.*.local
+
+# Файлы ОС
+.DS_Store
+Thumbs.db
+
+# Редактор (в том числе VS Code)
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Тесты и покрытие
+coverage/
+
+# Временные файлы импорта (можно удалить из репозитория)
+todos_import.json
+convert_xlsx.py
+export/*
