@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHashHistory } from 'vue-router';
 import WeekPage from '../pages/WeekPage.vue';
 import YearPage from '../pages/YearPage.vue';
 
@@ -8,7 +8,7 @@ const routes = [
 ];
 
 const router = createRouter({
-  history: createWebHistory('/todo/'), // соответствует base в vite.config.js
+  history: createWebHashHistory('/todo/'), // ← хеш-режим
   routes,
 });
 
