@@ -1,0 +1,9 @@
+:root {
+  /* --color-planned: #3498db; */
+  --color-planned: #a4a4a4;
+  --color-postponed: #f39c12;
+  --color-done: #2ecc71;
+  --color-cancelled: #e74c3c;
+  --color-caught-up: #619d68;
+  /* --color-caught-up: #2ecc70;  */
+}
