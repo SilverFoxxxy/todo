@@ -15,39 +15,32 @@ import {
 
 const STATUSES = ['Planned', 'Postponed', 'Done', 'Cancelled', 'Caught Up'];
 
-// Вспомогательная функция: получить понедельник для даты
 function getMonday(date) {
   const d = new Date(date);
-  const day = d.getDay(); // 0 = ВС
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // поправка для ПН
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
   return new Date(d.setDate(diff));
 }
 
-// Ключ для localStorage в формате "todo-week-ГГГГ-WНН"
 function getWeekKey(date) {
   const monday = getMonday(date);
-  // ISO week number
   const d = new Date(monday);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 3); // Четверг
+  d.setDate(d.getDate() + 3);
   const jan1 = new Date(d.getFullYear(), 0, 1);
   const weekNum = Math.ceil(((d - jan1) / 86400000 + 1) / 7);
   return `todo-week-${monday.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
-// Форматирование даты YYYY-MM-DD
 function toDateStr(date) {
   const d = new Date(date);
   return d.toISOString().slice(0, 10);
 }
 
-// Хранилище в оперативной памяти (реактивный объект)
-const weekData = ref({}); // { 'YYYY-MM-DD': [ { id, text, status }, ... ], ... }
-
-// Текущий понедельник отображаемой недели (реактивно)
+// ================= Хранилище недели =================
+const weekData = ref({});
 const currentMonday = ref(getMonday(new Date()));
 
-// Загрузка недели из localStorage
 function loadWeek(date) {
   const monday = getMonday(date);
   const key = getWeekKey(monday);
@@ -61,28 +54,20 @@ function loadWeek(date) {
   } else {
     weekData.value = {};
   }
-
-  // Гарантируем, что для всех 7 дней недели есть массив
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     const dateStr = toDateStr(d);
-    if (!weekData.value[dateStr]) {
-      weekData.value[dateStr] = [];
-    }
+    if (!weekData.value[dateStr]) weekData.value[dateStr] = [];
   }
 }
 
-// Сохранение текущей недели в localStorage
 function saveWeek() {
   const key = getWeekKey(currentMonday.value);
   localStorage.setItem(key, JSON.stringify(weekData.value));
 }
-
-// Автосохранение при изменении данных (watch на weekData)
 watch(weekData, saveWeek, { deep: true });
 
-// Переключение недели (влево/вправо)
 function shiftWeek(delta) {
   const newMonday = new Date(currentMonday.value);
   newMonday.setDate(newMonday.getDate() + delta * 7);
@@ -90,7 +75,6 @@ function shiftWeek(delta) {
   loadWeek(currentMonday.value);
 }
 
-// Массив дат текущей недели (ПН..ВС)
 const weekDays = computed(() => {
   const days = [];
   const start = new Date(currentMonday.value);
@@ -102,26 +86,22 @@ const weekDays = computed(() => {
   return days;
 });
 
-// Получить список дел для конкретного дня
 function getTodosForDay(dateStr) {
   return weekData.value[dateStr] || [];
 }
 
-// Добавить задачу в день
+// ================= Мутаторы (помечают неделю dirty) =================
 function addTodo(dateStr, text) {
-  if (!weekData.value[dateStr]) {
-    weekData.value[dateStr] = [];
-  }
-  const newTodo = {
+  if (!weekData.value[dateStr]) weekData.value[dateStr] = [];
+  weekData.value[dateStr].push({
     id: crypto.randomUUID(),
     text,
     status: 'Planned',
-  };
-  weekData.value[dateStr].push(newTodo);
+  });
+  markWeekDirty(getWeekKey(new Date(dateStr)));
   scheduleCloudSync(dateStr);
 }
 
-// Обновить задачу (изменение текста или статуса)
 function updateTodo(dateStr, todoId, changes) {
   const todos = weekData.value[dateStr];
   if (!todos) return;
@@ -129,21 +109,21 @@ function updateTodo(dateStr, todoId, changes) {
   if (todo) {
     Object.assign(todo, changes);
   }
+  markWeekDirty(getWeekKey(new Date(dateStr)));
   scheduleCloudSync(dateStr);
 }
 
-// Удалить задачу
 function deleteTodo(dateStr, todoId) {
   const todos = weekData.value[dateStr];
   if (!todos) return;
   weekData.value[dateStr] = todos.filter(t => t.id !== todoId);
+  markWeekDirty(getWeekKey(new Date(dateStr)));
   scheduleCloudSync(dateStr);
 }
 
-// Порядок статусов (пользовательский)
+// ================= Статусы и их порядок =================
 const statusOrder = ref([...STATUSES]);
 
-// Загрузка порядка из localStorage
 function loadStatusOrder() {
   const saved = localStorage.getItem('todo-status-order');
   if (saved) {
@@ -159,43 +139,19 @@ function loadStatusOrder() {
     } catch (e) {}
   }
 }
-
-// Сохранение порядка
 function saveStatusOrder() {
   localStorage.setItem('todo-status-order', JSON.stringify(statusOrder.value));
 }
-
-// Вызови при инициализации
 loadStatusOrder();
-
-// Автосохранение при изменении порядка
 watch(statusOrder, saveStatusOrder, { deep: true });
 
-// Облачная синхронизация
+// ================= Облачные метки и dirty =================
 const cloudEnabled = ref(false);
-const isSyncing = ref(false);
 const cloudSyncing = ref('');
-const driveFileIds = reactive({}); // { 'todo-week-2026-W23': 'fileId' }
+const isSyncing = ref(false); // блокирует scheduleCloudSync во время полной синхронизации
+const driveFileIds = reactive({});
 
-function loadLocalModifiedMap() {
-  try {
-    return JSON.parse(localStorage.getItem('todo-local-modified') || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function saveLocalModifiedMap(map) {
-  localStorage.setItem('todo-local-modified', JSON.stringify(map));
-}
-
-function updateLocalModified(weekKey) {
-  const map = loadLocalModifiedMap();
-  map[weekKey] = Date.now();
-  saveLocalModifiedMap(map);
-}
-
-// Локальное хранилище меток облачных изменений
+// Карта облачных меток (modifiedTime файла на Диске)
 function loadCloudModifiedMap() {
   try {
     return JSON.parse(localStorage.getItem('todo-cloud-modified') || '{}');
@@ -203,23 +159,39 @@ function loadCloudModifiedMap() {
     return {};
   }
 }
-
 function saveCloudModifiedMap(map) {
   localStorage.setItem('todo-cloud-modified', JSON.stringify(map));
 }
 
-// Планировщик отправки отдельной недели (дебаунс 2 сек)
+// Карта dirty (были ли локальные изменения)
+function loadDirtyMap() {
+  try {
+    return JSON.parse(localStorage.getItem('todo-dirty-weeks') || '{}');
+  } catch {
+    return {};
+  }
+}
+function saveDirtyMap(map) {
+  localStorage.setItem('todo-dirty-weeks', JSON.stringify(map));
+}
+function markWeekDirty(weekKey) {
+  const map = loadDirtyMap();
+  map[weekKey] = true;
+  saveDirtyMap(map);
+}
+function clearWeekDirty(weekKey) {
+  const map = loadDirtyMap();
+  delete map[weekKey];
+  saveDirtyMap(map);
+}
+
+// ================= Планировщик отправки =================
 const weekSyncTimers = {};
 
 function scheduleCloudSync(dateStr) {
   if (!cloudEnabled.value || !isSignedIn.value || isSyncing.value) return;
   const weekKey = getWeekKey(new Date(dateStr));
-  updateLocalModified(weekKey); // запоминаем время локального изменения
-
-  if (weekSyncTimers[weekKey]) {
-    clearTimeout(weekSyncTimers[weekKey]);
-  }
-
+  if (weekSyncTimers[weekKey]) clearTimeout(weekSyncTimers[weekKey]);
   weekSyncTimers[weekKey] = setTimeout(() => {
     const raw = localStorage.getItem(weekKey);
     if (raw) {
@@ -234,57 +206,40 @@ function scheduleCloudSync(dateStr) {
   }, 2000);
 }
 
-// Инициализация облачной синхронизации при старте
+// ================= Инициализация и вход/выход =================
 async function initCloudSync() {
   console.log('🚀 Инициализация облачной синхронизации…');
   initGoogleAuth();
-
   const storedToken = localStorage.getItem('google_token');
   const expires = localStorage.getItem('google_token_expires');
   if (storedToken && expires) {
-    const savedScope = localStorage.getItem('google_token_scope');
     const expiryTime = parseInt(expires);
     if (Date.now() < expiryTime) {
       accessToken.value = storedToken;
       isSignedIn.value = true;
       cloudEnabled.value = true;
       await fullSyncFromCloud();
-      if (cloudEnabled.value) {
-        startPolling();
-      }
-    } else {
-      // Можно попытаться тихий вход, но пока оставим
     }
-  } else {
-    console.log('🔍 Токен не найден, жду ручного входа');
   }
 }
 
-// Ручной вход через forceReauth
 async function enableCloudSync() {
   if (cloudEnabled.value) return;
   console.log('🔐 Запускаю процесс входа…');
-  if (!isSignedIn.value) {
-    await forceReauth();
-  }
+  if (!isSignedIn.value) await forceReauth();
   cloudEnabled.value = true;
   console.log('✅ Вход выполнен, начинаю синхронизацию');
   await fullSyncFromCloud();
-  startPolling();
 }
 
-// Выход из облачной синхронизации
 function disableCloudSync() {
   cloudEnabled.value = false;
-  stopPolling();
   signOut();
-  // Очищаем кэш ID файлов
-  for (const key in driveFileIds) {
-    delete driveFileIds[key];
-  }
+  for (const key in driveFileIds) delete driveFileIds[key];
+  stopPolling();
 }
 
-// Отправка конкретной недели в облако
+// ================= Отправка конкретной недели =================
 async function pushWeekToCloud(weekKey, data) {
   if (!cloudEnabled.value || !isSignedIn.value) return;
   const fileName = `${weekKey}.json`;
@@ -293,62 +248,124 @@ async function pushWeekToCloud(weekKey, data) {
   try {
     let existingId = driveFileIds[weekKey];
     if (existingId) {
-      try {
-        const result = await uploadFile(fileName, data, existingId); // data без _lastModified
-        const cloudMap = loadCloudModifiedMap();
-        cloudMap[weekKey] = new Date(result.modifiedTime).getTime();
-        saveCloudModifiedMap(cloudMap);
-        console.log(`   ✅ Обновлён существующий файл`);
-        cloudSyncing.value = '';
-        return;
-      } catch (e) {
-        /* обработка 403 как раньше */
+      // Проверим, не изменился ли файл в облаке
+      const metaRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${existingId}?fields=modifiedTime`,
+        { headers: { Authorization: `Bearer ${accessToken.value}` } }
+      );
+      if (metaRes.ok) {
+        const meta = await metaRes.json();
+        const currentCloudModified = new Date(meta.modifiedTime).getTime();
+        const expectedModified = loadCloudModifiedMap()[weekKey] || 0;
+        if (expectedModified && currentCloudModified !== expectedModified) {
+          console.warn(
+            `⚠️ Облачный файл изменён другим устройством, отправка отменена`
+          );
+          cloudSyncing.value = '';
+          return;
+        }
       }
+      const result = await uploadFile(fileName, data, existingId);
+      const cloudMap = loadCloudModifiedMap();
+      cloudMap[weekKey] = new Date(result.modifiedTime).getTime();
+      saveCloudModifiedMap(cloudMap);
+      clearWeekDirty(weekKey);
+      console.log(`   ✅ Обновлён существующий файл`);
+      cloudSyncing.value = '';
+      return;
     }
-    // создание нового файла
+    // Новый файл
     const result = await uploadFile(fileName, data);
     if (result?.id) {
       driveFileIds[weekKey] = result.id;
       const cloudMap = loadCloudModifiedMap();
       cloudMap[weekKey] = new Date(result.modifiedTime).getTime();
       saveCloudModifiedMap(cloudMap);
+      clearWeekDirty(weekKey);
       console.log(`   ✅ Создан новый файл с ID: ${result.id}`);
     }
     cloudSyncing.value = '';
   } catch (e) {
-    /* обработка ошибок */
+    if (e.message?.includes('403')) {
+      console.warn(`   ⚠️ Нет прав на изменение файла`);
+      delete driveFileIds[weekKey];
+      cloudSyncing.value = 'Ошибка доступа';
+      setTimeout(() => {
+        cloudSyncing.value = '';
+      }, 5000);
+      return;
+    }
+    console.error(`❌ Ошибка отправки ${weekKey}:`, e);
+    cloudSyncing.value = 'Ошибка отправки';
+    setTimeout(() => {
+      cloudSyncing.value = '';
+    }, 3000);
   }
 }
 
-// Полная синхронизация с облаком (используется при старте и после входа)
+// ================= Полная синхронизация (с использованием dirty) =================
 async function fullSyncFromCloud() {
   if (!cloudEnabled.value || !isSignedIn.value) return;
   isSyncing.value = true;
   cloudSyncing.value = 'Получение списка файлов…';
-  console.log('🔄 Начинаю полную синхронизацию с Google Диском…');
+  console.log('🔄 Синхронизация с облаком…');
   try {
     const files = await listWeekFiles();
-    cloudSyncing.value = `Найдено ${files.length} файлов`;
-    console.log(`📁 Найдено ${files.length} файлов недель на Диске`);
+    // Убираем дубликаты: для каждой недели оставляем самый свежий файл
+    const bestFiles = {};
+    for (const file of files) {
+      const match = file.name.match(
+        /^(todo-week-\d{4}-W\d{2})(?:-\d+)?\.json$/
+      );
+      if (!match) continue;
+      const baseKey = match[1];
+      const fileTime = new Date(file.modifiedTime).getTime();
+      if (!bestFiles[baseKey] || fileTime > bestFiles[baseKey].time) {
+        bestFiles[baseKey] = { file, time: fileTime };
+      }
+    }
+    const uniqueFiles = Object.values(bestFiles).map(item => item.file);
+    cloudSyncing.value = `Найдено ${uniqueFiles.length} файлов`;
+    console.log(`📁 Найдено ${uniqueFiles.length} файлов недель на Диске`);
 
     const cloudModifiedMap = loadCloudModifiedMap();
-    const localModifiedMap = loadLocalModifiedMap();
+    const dirtyMap = loadDirtyMap();
     let processed = 0;
 
-    for (const file of files) {
-      const key = file.name.replace('.json', '');
+    for (const file of uniqueFiles) {
+      const key = file.name
+        .replace(/-\d+\.json$/, '.json')
+        .replace('.json', '');
       const cloudModified = new Date(file.modifiedTime).getTime();
       const savedCloudModified = cloudModifiedMap[key] || 0;
+      const dirty = dirtyMap[key] || false;
 
-      // Шаг 1: если облачное время не изменилось, пропускаем
-      if (cloudModified === savedCloudModified) {
+      // Правило 1: облако не менялось и нет локальных правок
+      if (!dirty && cloudModified === savedCloudModified) {
         console.log(`   ⏩ ${file.name} не изменился, пропускаю`);
         continue;
       }
 
-      // Файл изменился в облаке
-      cloudSyncing.value = `Загрузка ${file.name} (${++processed}/${files.length})…`;
-      console.log(`   📥 Загрузка ${file.name}…`);
+      // Правило 2: есть локальные правки, облако не менялось — отправляем
+      if (dirty && cloudModified === savedCloudModified) {
+        console.log(
+          `   🔼 Локальные изменения для ${key}, облако не менялось – отправляю`
+        );
+        const localRaw = localStorage.getItem(key);
+        if (localRaw) {
+          try {
+            const localData = JSON.parse(localRaw);
+            await pushWeekToCloud(key, localData);
+          } catch (e) {
+            console.warn(`Ошибка отправки ${key}:`, e);
+          }
+        }
+        continue;
+      }
+
+      // Правило 3: облако изменилось (или dirty && cloudModified != savedCloudModified) — принимаем облачную версию
+      cloudSyncing.value = `Загрузка ${file.name} (${++processed}/${uniqueFiles.length})…`;
+      console.log(`   📥 Загрузка ${file.name} (облако изменилось)`);
       let cloudData;
       try {
         cloudData = await downloadFile(file.id);
@@ -356,42 +373,16 @@ async function fullSyncFromCloud() {
         console.warn(`⚠️ Не удалось скачать ${file.name}, пропускаю`);
         continue;
       }
-
-      const localParsed = (() => {
-        const raw = localStorage.getItem(key);
-        if (raw)
-          try {
-            return JSON.parse(raw);
-          } catch (e) {}
-        return null;
-      })();
-
-      const localModified = localModifiedMap[key] || 0;
-
-      // Шаг 2: сравнение локального времени с облачным
-      if (localModified > cloudModified) {
-        // Локальная версия новее — отправляем в облако
-        console.log(`      🔽 Локальная версия новее, отправляю в облако`);
-        await pushWeekToCloud(key, localParsed); // pushWeekToCloud обновит cloudModifiedMap
-      } else {
-        // Облачная версия новее (или равна) — сохраняем локально
-        console.log(`      🔼 Облачная версия новее, сохраняю локально`);
-        localStorage.setItem(key, JSON.stringify(cloudData));
-        cloudModifiedMap[key] = cloudModified;
-        localModifiedMap[key] = cloudModified; // синхронизируем локальную метку
-      }
+      localStorage.setItem(key, JSON.stringify(cloudData));
+      cloudModifiedMap[key] = cloudModified;
+      clearWeekDirty(key);
     }
 
     saveCloudModifiedMap(cloudModifiedMap);
-    saveLocalModifiedMap(localModifiedMap);
-
-    // Синхронизируем локальные недели, которых нет в облаке (опционально)
-    await syncAllLocalWeeks(); // внутри использует ту же логику
-
-    console.log('✅ Полная синхронизация завершена');
+    console.log('✅ Синхронизация завершена');
     loadWeek(currentMonday.value);
   } catch (err) {
-    console.error('❌ Критическая ошибка полной синхронизации:', err);
+    console.error('❌ Ошибка синхронизации:', err);
     cloudSyncing.value = 'Ошибка синхронизации';
     setTimeout(() => {
       cloudSyncing.value = '';
@@ -403,73 +394,9 @@ async function fullSyncFromCloud() {
   }
 }
 
-// Отправка всех локальных недель, которых нет в облаке или которые новее (используется при импорте)
-async function syncAllLocalWeeks() {
-  if (!cloudEnabled.value || !isSignedIn.value) return;
-  cloudSyncing.value = 'Синхронизация всех локальных недель…';
-  console.log('📤 Проверяю все локальные недели…');
-
-  let cloudFiles = [];
-  try {
-    cloudFiles = await listWeekFiles();
-  } catch (e) {
-    console.warn('⚠️ Не удалось получить список облачных файлов');
-  }
-
-  const cloudFileMap = {};
-  for (const file of cloudFiles) {
-    cloudFileMap[file.name] = file;
-  }
-
-  const localKeys = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key.startsWith('todo-week-')) localKeys.push(key);
-  }
-
-  const localModifiedMap = loadLocalModifiedMap();
-  const cloudModifiedMap = loadCloudModifiedMap();
-
-  for (const key of localKeys) {
-    const localRaw = localStorage.getItem(key);
-    if (!localRaw) continue;
-    let localParsed;
-    try {
-      localParsed = JSON.parse(localRaw);
-    } catch (e) {
-      continue;
-    }
-    const localModified = localModifiedMap[key] || 0;
-
-    const cloudFile = cloudFileMap[`${key}.json`];
-    const cloudModified = cloudFile
-      ? new Date(cloudFile.modifiedTime).getTime()
-      : 0;
-
-    if (!cloudFile) {
-      // Нет в облаке — создаём
-      console.log(`   🆕 Создаю облачный файл для ${key}`);
-      await pushWeekToCloud(key, localParsed);
-    } else if (localModified > cloudModified) {
-      // Локальная новее — отправляем
-      console.log(`   ⬆️ Локальная версия ${key} новее, отправляю`);
-      await pushWeekToCloud(key, localParsed);
-    } else {
-      // Облачная актуальна (или равна) — ничего не делаем
-      console.log(`   ✅ ${key} – актуальная версия уже в облаке`);
-    }
-  }
-
-  console.log('✅ Отправка всех локальных недель завершена');
-  isSyncing.value = false;
-  if (cloudSyncing.value !== 'Ошибка синхронизации')
-    cloudSyncing.value = 'In sync';
-}
-
-// Первоначальная загрузка локальных данных
-loadWeek(currentMonday.value);
+// ================= Периодический опрос =================
 let pollTimeout = null;
-const POLL_INTERVAL = 10000;
+const POLL_INTERVAL = 30000;
 
 async function pollOnce() {
   if (!cloudEnabled.value || !isSignedIn.value || isSyncing.value) return;
@@ -483,7 +410,9 @@ async function pollOnce() {
     const cloudModifiedMap = loadCloudModifiedMap();
     let hasChanges = false;
     for (const file of files) {
-      const key = file.name.replace('.json', '');
+      const key = file.name
+        .replace(/-\d+\.json$/, '.json')
+        .replace('.json', '');
       const cloudModified = new Date(file.modifiedTime).getTime();
       if (cloudModifiedMap[key] !== cloudModified) {
         hasChanges = true;
@@ -510,11 +439,18 @@ function startPolling() {
   stopPolling();
   scheduleNextPoll();
 }
-
 function stopPolling() {
   clearTimeout(pollTimeout);
   pollTimeout = null;
 }
+// Запускаем опрос после входа
+watch(cloudEnabled, val => {
+  if (val) startPolling();
+  else stopPolling();
+});
+
+// ================= Экспорт =================
+loadWeek(currentMonday.value);
 
 export function useTodoStore() {
   return {
@@ -533,7 +469,5 @@ export function useTodoStore() {
     initCloudSync,
     enableCloudSync,
     disableCloudSync,
-    fullSyncFromCloud,
-    syncAllLocalWeeks,
   };
 }
