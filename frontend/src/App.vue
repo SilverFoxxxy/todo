@@ -74,18 +74,24 @@ function importJSON(event) {
 function clearAllData() {
   if (
     confirm(
-      'Вы уверены, что хотите удалить ВСЕ задачи? Это действие необратимо.'
+      'Вы уверены, что хотите удалить ВСЕ задачи и данные синхронизации? Это действие необратимо.'
     )
   ) {
+    // Удаляем все ключи, начинающиеся с 'todo-'
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key.startsWith('todo-week-')) {
+      if (key.startsWith('todo-')) {
         keysToRemove.push(key);
       }
     }
     keysToRemove.forEach(key => localStorage.removeItem(key));
-    localStorage.removeItem('todo-status-order');
+
+    // Удаляем также данные авторизации Google (опционально)
+    localStorage.removeItem('google_token');
+    localStorage.removeItem('google_token_expires');
+    localStorage.removeItem('google_token_scope');
+
     alert('Данные удалены. Страница перезагрузится.');
     location.reload();
   }
