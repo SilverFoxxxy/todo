@@ -1,4 +1,4 @@
-import { ref, computed, watch, reactive } from 'vue';
+import { ref, computed, watch, reactive, onUnmounted } from 'vue';
 import {
   isSignedIn,
   signIn,
@@ -17,9 +17,11 @@ const STATUSES = ['Planned', 'Postponed', 'Done', 'Cancelled', 'Caught Up'];
 
 function getMonday(date) {
   const d = new Date(date);
-  const day = d.getDay();
+  const day = d.getDay(); // локальный день недели (0 = вс)
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  return new Date(d.setDate(diff));
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 function getWeekKey(date) {
@@ -34,7 +36,10 @@ function getWeekKey(date) {
 
 function toDateStr(date) {
   const d = new Date(date);
-  return d.toISOString().slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 // ================= Хранилище недели =================
@@ -80,7 +85,7 @@ const weekDays = computed(() => {
   const start = new Date(currentMonday.value);
   for (let i = 0; i < 7; i++) {
     const d = new Date(start);
-    d.setDate(start.getDate() + i);
+    d.setDate(d.getDate() + i); // локальное приращение дня
     days.push(toDateStr(d));
   }
   return days;
@@ -90,7 +95,7 @@ function getTodosForDay(dateStr) {
   return weekData.value[dateStr] || [];
 }
 
-// ================= Мутаторы (помечают неделю dirty) =================
+// ================= Мутаторы (помечают неделю dirty и ставят в очередь) =================
 function addTodo(dateStr, text) {
   if (!weekData.value[dateStr]) weekData.value[dateStr] = [];
   weekData.value[dateStr].push({
@@ -99,7 +104,7 @@ function addTodo(dateStr, text) {
     status: 'Planned',
   });
   markWeekDirty(getWeekKey(new Date(dateStr)));
-  scheduleCloudSync(dateStr);
+  enqueueWeek(getWeekKey(new Date(dateStr)));
 }
 
 function updateTodo(dateStr, todoId, changes) {
@@ -110,7 +115,7 @@ function updateTodo(dateStr, todoId, changes) {
     Object.assign(todo, changes);
   }
   markWeekDirty(getWeekKey(new Date(dateStr)));
-  scheduleCloudSync(dateStr);
+  enqueueWeek(getWeekKey(new Date(dateStr)));
 }
 
 function deleteTodo(dateStr, todoId) {
@@ -118,7 +123,7 @@ function deleteTodo(dateStr, todoId) {
   if (!todos) return;
   weekData.value[dateStr] = todos.filter(t => t.id !== todoId);
   markWeekDirty(getWeekKey(new Date(dateStr)));
-  scheduleCloudSync(dateStr);
+  enqueueWeek(getWeekKey(new Date(dateStr)));
 }
 
 // ================= Статусы и их порядок =================
@@ -148,10 +153,9 @@ watch(statusOrder, saveStatusOrder, { deep: true });
 // ================= Облачные метки и dirty =================
 const cloudEnabled = ref(false);
 const cloudSyncing = ref('');
-const isSyncing = ref(false); // блокирует scheduleCloudSync во время полной синхронизации
+const isSyncing = ref(false);
 const driveFileIds = reactive({});
 
-// Карта облачных меток (modifiedTime файла на Диске)
 function loadCloudModifiedMap() {
   try {
     return JSON.parse(localStorage.getItem('todo-cloud-modified') || '{}');
@@ -163,7 +167,6 @@ function saveCloudModifiedMap(map) {
   localStorage.setItem('todo-cloud-modified', JSON.stringify(map));
 }
 
-// Карта dirty (были ли локальные изменения)
 function loadDirtyMap() {
   try {
     return JSON.parse(localStorage.getItem('todo-dirty-weeks') || '{}');
@@ -185,25 +188,271 @@ function clearWeekDirty(weekKey) {
   saveDirtyMap(map);
 }
 
-// ================= Планировщик отправки =================
-const weekSyncTimers = {};
+// ============ Слияние задач (merge) ============
+function mergeWeekDays(localObj, cloudObj) {
+  const result = {};
+  const allDates = new Set([
+    ...Object.keys(localObj || {}),
+    ...Object.keys(cloudObj || {}),
+  ]);
+  for (const date of allDates) {
+    const localTasks = localObj?.[date] || [];
+    const cloudTasks = cloudObj?.[date] || [];
+    const merged = new Map();
+    for (const t of cloudTasks) merged.set(t.id, t);
+    for (const t of localTasks) merged.set(t.id, t);
+    result[date] = Array.from(merged.values());
+  }
+  return result;
+}
 
-function scheduleCloudSync(dateStr) {
-  if (!cloudEnabled.value || !isSignedIn.value || isSyncing.value) return;
-  const weekKey = getWeekKey(new Date(dateStr));
-  if (weekSyncTimers[weekKey]) clearTimeout(weekSyncTimers[weekKey]);
-  weekSyncTimers[weekKey] = setTimeout(() => {
-    const raw = localStorage.getItem(weekKey);
-    if (raw) {
-      try {
-        const data = JSON.parse(raw);
-        pushWeekToCloud(weekKey, data);
-      } catch (e) {
-        console.warn(`Ошибка отправки недели ${weekKey}:`, e);
+// ================= Очередь синхронизации =================
+const syncQueue = ref([]);
+const isProcessingQueue = ref(false);
+
+function enqueueWeek(weekKey) {
+  if (!cloudEnabled.value || !isSignedIn.value) return;
+  if (!syncQueue.value.includes(weekKey)) {
+    syncQueue.value.push(weekKey);
+  }
+}
+
+async function processQueue() {
+  console.log(isInSync.value);
+  console.log('queue len:', syncQueue.value.length);
+  if (isProcessingQueue.value || syncQueue.value.length === 0) return;
+  isProcessingQueue.value = true;
+  try {
+    while (syncQueue.value.length > 0) {
+      const weekKey = syncQueue.value.shift();
+      await syncWeek(weekKey);
+    }
+  } finally {
+    isProcessingQueue.value = false;
+  }
+}
+
+// ================= Отправка конкретной недели (с полным управлением состоянием) =================
+async function pushWeekToCloud(weekKey, data) {
+  if (!cloudEnabled.value || !isSignedIn.value) return null;
+  const fileName = `${weekKey}.json`;
+  console.log(`☁️ Отправка недели ${weekKey} в облако…`);
+  let newModified = null;
+  try {
+    let existingId = driveFileIds[weekKey];
+    if (existingId) {
+      const result = await uploadFile(fileName, data, existingId);
+      console.log('   ✅ Обновлён существующий файл');
+      newModified = new Date(result.modifiedTime).getTime();
+    } else {
+      const result = await uploadFile(fileName, data);
+      if (result?.id) {
+        driveFileIds[weekKey] = result.id;
+        console.log(`   ✅ Создан новый файл с ID: ${result.id}`);
+        newModified = new Date(result.modifiedTime).getTime();
       }
     }
-    delete weekSyncTimers[weekKey];
-  }, 2000);
+
+    if (newModified) {
+      const cmap = loadCloudModifiedMap();
+      cmap[weekKey] = newModified;
+      saveCloudModifiedMap(cmap);
+      clearWeekDirty(weekKey); // ← всегда сбрасываем
+    }
+  } catch (e) {
+    if (e.message?.includes('403')) {
+      console.warn('   ⚠️ Нет прав на изменение файла');
+      return null;
+    }
+    console.error(`❌ Ошибка отправки ${weekKey}:`, e);
+    throw e;
+  }
+  return newModified;
+}
+
+// ================= Синхронизация одной недели =================
+async function syncWeek(weekKey) {
+  const cloudModifiedMap = loadCloudModifiedMap();
+  const dirtyMap = loadDirtyMap();
+  const savedCloudModified = cloudModifiedMap[weekKey] || 0;
+  const dirty = dirtyMap[weekKey] || false;
+
+  let cloudFile = null;
+  try {
+    const allFiles = await listWeekFiles();
+    const best = {};
+    for (const f of allFiles) {
+      const match = f.name.match(/^(todo-week-\d{4}-W\d{2})(?:-\d+)?\.json$/);
+      if (!match) continue;
+      const key = match[1];
+      if (key !== weekKey) continue;
+      const t = new Date(f.modifiedTime).getTime();
+      if (!best[key] || t > best[key].time) best[key] = { file: f, time: t };
+    }
+    if (best[weekKey]) cloudFile = best[weekKey].file;
+  } catch (e) {
+    console.warn(`Не удалось получить облачную информацию для ${weekKey}`, e);
+  }
+
+  const cloudModified = cloudFile
+    ? new Date(cloudFile.modifiedTime).getTime()
+    : null;
+
+  // Запоминаем ID облачного файла, чтобы при будущей отправке обновлять, а не создавать дубликат
+  if (cloudFile && !driveFileIds[weekKey]) {
+    driveFileIds[weekKey] = cloudFile.id;
+  }
+
+  // Случай 1: облачного файла ещё нет
+  if (!cloudFile) {
+    // if (dirty) {
+    const raw = localStorage.getItem(weekKey);
+    if (raw) {
+      const data = JSON.parse(raw);
+      console.log('push cause dirty, no cloud file');
+      await pushWeekToCloud(weekKey, data);
+    }
+    // }
+    return;
+  }
+
+  // Случай 2: облачный файл не менялся с нашей последней синхронизации
+  if (cloudModified === savedCloudModified) {
+    if (dirty) {
+      const raw = localStorage.getItem(weekKey);
+      if (raw) {
+        const data = JSON.parse(raw);
+        console.log('push cause dirty, same cloud file');
+        await pushWeekToCloud(weekKey, data);
+      }
+    }
+    return;
+  }
+
+  console.log('merge files - cloud file is newer');
+  console.log(cloudModified);
+  console.log(savedCloudModified);
+  // Случай 3: облачный файл изменился – загружаем и сливаем
+  let cloudData;
+  try {
+    cloudData = await downloadFile(cloudFile.id);
+  } catch (e) {
+    console.warn(`⚠️ Не удалось скачать ${weekKey}.json, пропускаю`);
+    return;
+  }
+  const localRaw = localStorage.getItem(weekKey);
+  const localParsed = localRaw ? JSON.parse(localRaw) : {};
+  const merged = mergeWeekDays(localParsed, cloudData);
+
+  // Сравниваем merged с облачной версией: если идентичны, нет смысла отправлять
+  if (JSON.stringify(merged) !== JSON.stringify(cloudData)) {
+    localStorage.setItem(weekKey, JSON.stringify(merged));
+    const cmap = loadCloudModifiedMap();
+    cmap[weekKey] = cloudModified;
+    saveCloudModifiedMap(cmap);
+    console.log('merge files - cloud file is newer, sending merged version');
+    await pushWeekToCloud(weekKey, merged);
+  } else {
+    // Данные не изменились, просто обновляем метку
+    console.log(
+      'merge files - cloud file is newer but merged is identical, skipping upload'
+    );
+    const cmap = loadCloudModifiedMap();
+    cmap[weekKey] = cloudModified;
+    saveCloudModifiedMap(cmap);
+    // Если локально были изменения, но они не привели к отличиям (например, удаление задачи, которая уже была удалена в облаке),
+    // то dirty можно сбросить, так как актуальное состояние уже в облаке.
+    if (dirty) {
+      clearWeekDirty(weekKey);
+    }
+  }
+}
+
+// ================= Сбор всех недель и наполнение очереди =================
+async function collectAndEnqueueAllWeeks() {
+  if (!cloudEnabled.value || !isSignedIn.value) return;
+  try {
+    const files = await listWeekFiles();
+    const cloudModifiedMap = loadCloudModifiedMap();
+    const dirtyMap = loadDirtyMap();
+
+    // Собираем все локальные ключи
+    const allWeekKeys = new Set();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key.startsWith('todo-week-')) allWeekKeys.add(key);
+    }
+
+    // Обрабатываем облачные файлы (убираем дубликаты, оставляем самый свежий)
+    const bestCloudFiles = {};
+    for (const file of files) {
+      const match = file.name.match(
+        /^(todo-week-\d{4}-W\d{2})(?:-\d+)?\.json$/
+      );
+      if (!match) continue;
+      const weekKey = match[1];
+      const t = new Date(file.modifiedTime).getTime();
+      if (!bestCloudFiles[weekKey] || t > bestCloudFiles[weekKey].time) {
+        bestCloudFiles[weekKey] = { id: file.id, modifiedTime: t };
+      }
+      allWeekKeys.add(weekKey);
+    }
+
+    console.log('load all weeks');
+    console.log(bestCloudFiles);
+    console.log(cloudModifiedMap);
+    console.log(dirtyMap);
+
+    // Для каждой недели проверяем, нужна ли синхронизация
+    for (const weekKey of allWeekKeys) {
+      const cloudFile = bestCloudFiles[weekKey];
+      const cloudModified = cloudFile ? cloudFile.modifiedTime : null;
+      const savedModified = cloudModifiedMap[weekKey] || 0;
+      const dirty = dirtyMap[weekKey] || false;
+
+      console.log('week params: ', cloudModified, savedModified, dirty);
+
+      // Добавляем, если:
+      // - облачного файла нет, но есть локальные данные (или dirty)
+      // - облачный файл изменился (cloudModified != savedModified)
+      // - есть локальные изменения (dirty)
+      if (!cloudFile) {
+        if (dirty || localStorage.getItem(weekKey)) {
+          enqueueWeek(weekKey);
+        }
+      } else if (cloudModified !== savedModified || dirty) {
+        enqueueWeek(weekKey);
+      }
+    }
+  } catch (e) {
+    console.warn('Ошибка при сборе недель для синхронизации:', e);
+  }
+}
+
+const isInSync = computed(
+  () =>
+    cloudEnabled.value &&
+    syncQueue.value.length === 0 &&
+    !isProcessingQueue.value
+);
+
+// ================= Таймеры =================
+let collectTimer = null;
+let processTimer = null;
+
+function startTimers() {
+  stopTimers();
+  // Каждые 10 секунд собираем все недели в очередь
+  collectTimer = setInterval(collectAndEnqueueAllWeeks, 10_000);
+  // Каждые 2 секунды пытаемся обработать очередь (если есть что и не занято)
+  processTimer = setInterval(processQueue, 2_000);
+}
+
+function stopTimers() {
+  clearInterval(collectTimer);
+  clearInterval(processTimer);
+  collectTimer = null;
+  processTimer = null;
 }
 
 // ================= Инициализация и вход/выход =================
@@ -218,7 +467,10 @@ async function initCloudSync() {
       accessToken.value = storedToken;
       isSignedIn.value = true;
       cloudEnabled.value = true;
-      await fullSyncFromCloud();
+      await collectAndEnqueueAllWeeks();
+      await processQueue(); // обрабатываем немедленно
+      startTimers();
+      loadWeek(currentMonday.value);
     }
   }
 }
@@ -229,225 +481,19 @@ async function enableCloudSync() {
   if (!isSignedIn.value) await forceReauth();
   cloudEnabled.value = true;
   console.log('✅ Вход выполнен, начинаю синхронизацию');
-  await fullSyncFromCloud();
+  await collectAndEnqueueAllWeeks();
+  await processQueue();
+  startTimers();
+  loadWeek(currentMonday.value);
 }
 
 function disableCloudSync() {
   cloudEnabled.value = false;
   signOut();
   for (const key in driveFileIds) delete driveFileIds[key];
-  stopPolling();
+  syncQueue.value = [];
+  stopTimers();
 }
-
-// ================= Отправка конкретной недели =================
-async function pushWeekToCloud(weekKey, data) {
-  if (!cloudEnabled.value || !isSignedIn.value) return;
-  const fileName = `${weekKey}.json`;
-  cloudSyncing.value = `Отправка ${fileName}…`;
-  console.log(`☁️ Отправка недели ${weekKey} в облако…`);
-  try {
-    let existingId = driveFileIds[weekKey];
-    if (existingId) {
-      // Проверим, не изменился ли файл в облаке
-      const metaRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${existingId}?fields=modifiedTime`,
-        { headers: { Authorization: `Bearer ${accessToken.value}` } }
-      );
-      if (metaRes.ok) {
-        const meta = await metaRes.json();
-        const currentCloudModified = new Date(meta.modifiedTime).getTime();
-        const expectedModified = loadCloudModifiedMap()[weekKey] || 0;
-        if (expectedModified && currentCloudModified !== expectedModified) {
-          console.warn(
-            `⚠️ Облачный файл изменён другим устройством, отправка отменена`
-          );
-          cloudSyncing.value = '';
-          return;
-        }
-      }
-      const result = await uploadFile(fileName, data, existingId);
-      const cloudMap = loadCloudModifiedMap();
-      cloudMap[weekKey] = new Date(result.modifiedTime).getTime();
-      saveCloudModifiedMap(cloudMap);
-      clearWeekDirty(weekKey);
-      console.log(`   ✅ Обновлён существующий файл`);
-      cloudSyncing.value = '';
-      return;
-    }
-    // Новый файл
-    const result = await uploadFile(fileName, data);
-    if (result?.id) {
-      driveFileIds[weekKey] = result.id;
-      const cloudMap = loadCloudModifiedMap();
-      cloudMap[weekKey] = new Date(result.modifiedTime).getTime();
-      saveCloudModifiedMap(cloudMap);
-      clearWeekDirty(weekKey);
-      console.log(`   ✅ Создан новый файл с ID: ${result.id}`);
-    }
-    cloudSyncing.value = '';
-  } catch (e) {
-    if (e.message?.includes('403')) {
-      console.warn(`   ⚠️ Нет прав на изменение файла`);
-      delete driveFileIds[weekKey];
-      cloudSyncing.value = 'Ошибка доступа';
-      setTimeout(() => {
-        cloudSyncing.value = '';
-      }, 5000);
-      return;
-    }
-    console.error(`❌ Ошибка отправки ${weekKey}:`, e);
-    cloudSyncing.value = 'Ошибка отправки';
-    setTimeout(() => {
-      cloudSyncing.value = '';
-    }, 3000);
-  }
-}
-
-// ================= Полная синхронизация (с использованием dirty) =================
-async function fullSyncFromCloud() {
-  if (!cloudEnabled.value || !isSignedIn.value) return;
-  isSyncing.value = true;
-  cloudSyncing.value = 'Получение списка файлов…';
-  console.log('🔄 Синхронизация с облаком…');
-  try {
-    const files = await listWeekFiles();
-    // Убираем дубликаты: для каждой недели оставляем самый свежий файл
-    const bestFiles = {};
-    for (const file of files) {
-      const match = file.name.match(
-        /^(todo-week-\d{4}-W\d{2})(?:-\d+)?\.json$/
-      );
-      if (!match) continue;
-      const baseKey = match[1];
-      const fileTime = new Date(file.modifiedTime).getTime();
-      if (!bestFiles[baseKey] || fileTime > bestFiles[baseKey].time) {
-        bestFiles[baseKey] = { file, time: fileTime };
-      }
-    }
-    const uniqueFiles = Object.values(bestFiles).map(item => item.file);
-    cloudSyncing.value = `Найдено ${uniqueFiles.length} файлов`;
-    console.log(`📁 Найдено ${uniqueFiles.length} файлов недель на Диске`);
-
-    const cloudModifiedMap = loadCloudModifiedMap();
-    const dirtyMap = loadDirtyMap();
-    let processed = 0;
-
-    for (const file of uniqueFiles) {
-      const key = file.name
-        .replace(/-\d+\.json$/, '.json')
-        .replace('.json', '');
-      const cloudModified = new Date(file.modifiedTime).getTime();
-      const savedCloudModified = cloudModifiedMap[key] || 0;
-      const dirty = dirtyMap[key] || false;
-
-      // Правило 1: облако не менялось и нет локальных правок
-      if (!dirty && cloudModified === savedCloudModified) {
-        console.log(`   ⏩ ${file.name} не изменился, пропускаю`);
-        continue;
-      }
-
-      // Правило 2: есть локальные правки, облако не менялось — отправляем
-      if (dirty && cloudModified === savedCloudModified) {
-        console.log(
-          `   🔼 Локальные изменения для ${key}, облако не менялось – отправляю`
-        );
-        const localRaw = localStorage.getItem(key);
-        if (localRaw) {
-          try {
-            const localData = JSON.parse(localRaw);
-            await pushWeekToCloud(key, localData);
-          } catch (e) {
-            console.warn(`Ошибка отправки ${key}:`, e);
-          }
-        }
-        continue;
-      }
-
-      // Правило 3: облако изменилось (или dirty && cloudModified != savedCloudModified) — принимаем облачную версию
-      cloudSyncing.value = `Загрузка ${file.name} (${++processed}/${uniqueFiles.length})…`;
-      console.log(`   📥 Загрузка ${file.name} (облако изменилось)`);
-      let cloudData;
-      try {
-        cloudData = await downloadFile(file.id);
-      } catch (e) {
-        console.warn(`⚠️ Не удалось скачать ${file.name}, пропускаю`);
-        continue;
-      }
-      localStorage.setItem(key, JSON.stringify(cloudData));
-      cloudModifiedMap[key] = cloudModified;
-      clearWeekDirty(key);
-    }
-
-    saveCloudModifiedMap(cloudModifiedMap);
-    console.log('✅ Синхронизация завершена');
-    loadWeek(currentMonday.value);
-  } catch (err) {
-    console.error('❌ Ошибка синхронизации:', err);
-    cloudSyncing.value = 'Ошибка синхронизации';
-    setTimeout(() => {
-      cloudSyncing.value = '';
-    }, 3000);
-  } finally {
-    isSyncing.value = false;
-    if (cloudSyncing.value !== 'Ошибка синхронизации')
-      cloudSyncing.value = 'In sync';
-  }
-}
-
-// ================= Периодический опрос =================
-let pollTimeout = null;
-const POLL_INTERVAL = 30000;
-
-async function pollOnce() {
-  if (!cloudEnabled.value || !isSignedIn.value || isSyncing.value) return;
-  if (document.visibilityState === 'hidden') {
-    scheduleNextPoll();
-    return;
-  }
-  console.log('🔄 Периодическая проверка облака…');
-  try {
-    const files = await listWeekFiles();
-    const cloudModifiedMap = loadCloudModifiedMap();
-    let hasChanges = false;
-    for (const file of files) {
-      const key = file.name
-        .replace(/-\d+\.json$/, '.json')
-        .replace('.json', '');
-      const cloudModified = new Date(file.modifiedTime).getTime();
-      if (cloudModifiedMap[key] !== cloudModified) {
-        hasChanges = true;
-        break;
-      }
-    }
-    if (hasChanges) {
-      console.log('🔁 Обнаружены изменения, запускаю синхронизацию');
-      await fullSyncFromCloud();
-    }
-  } catch (e) {
-    console.warn('Ошибка периодической проверки:', e);
-  } finally {
-    scheduleNextPoll();
-  }
-}
-
-function scheduleNextPoll() {
-  if (!cloudEnabled.value) return;
-  pollTimeout = setTimeout(pollOnce, POLL_INTERVAL);
-}
-
-function startPolling() {
-  stopPolling();
-  scheduleNextPoll();
-}
-function stopPolling() {
-  clearTimeout(pollTimeout);
-  pollTimeout = null;
-}
-// Запускаем опрос после входа
-watch(cloudEnabled, val => {
-  if (val) startPolling();
-  else stopPolling();
-});
 
 // ================= Экспорт =================
 loadWeek(currentMonday.value);
@@ -469,5 +515,6 @@ export function useTodoStore() {
     initCloudSync,
     enableCloudSync,
     disableCloudSync,
+    isInSync,
   };
 }

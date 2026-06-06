@@ -49,7 +49,7 @@ export function forceReauth() {
 
     const tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
-      scope: 'https://www.googleapis.com/auth/drive.file', // полный доступ
+      scope: 'https://www.googleapis.com/auth/drive', // полный доступ
       callback: response => {
         if (response.error) {
           reject(response.error);
@@ -95,7 +95,7 @@ export function trySilentLogin() {
     if (!tokenClient) {
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.file',
+        scope: 'https://www.googleapis.com/auth/drive',
         callback: response => {
           if (response.error) {
             resolve(false);
@@ -121,7 +121,7 @@ export async function signIn() {
   return new Promise((resolve, reject) => {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
-      scope: 'https://www.googleapis.com/auth/drive.file',
+      scope: 'https://www.googleapis.com/auth/drive',
       callback: response => {
         if (response.error) {
           reject(response.error);
@@ -153,39 +153,71 @@ export function signOut() {
 // Остальные функции (getOrCreateFolder, listWeekFiles, downloadFile, uploadFile) без изменений,
 // они используют accessToken.value
 
-async function getOrCreateFolder() {
+// В начало файла добавьте константу для ключа localStorage
+const FOLDER_ID_KEY = 'todo-folder-id';
+
+// Замените getOrCreateFolder на новую функцию getAppFolderId
+async function getAppFolderId() {
+  // 1. Пробуем найти сохранённый ID
+  const storedId = localStorage.getItem(FOLDER_ID_KEY);
+  if (storedId) {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${storedId}?fields=id`,
+        { headers: { Authorization: `Bearer ${accessToken.value}` } }
+      );
+      if (res.ok) return storedId; // папка существует
+    } catch (e) {}
+    // Если папка не найдена, удаляем сохранённый ID
+    localStorage.removeItem(FOLDER_ID_KEY);
+  }
+
+  // 2. Ищем все папки с именем weekly-todo
   const query = `name='${APP_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id)`,
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,modifiedTime)`,
     { headers: { Authorization: `Bearer ${accessToken.value}` } }
   );
   const data = await res.json();
-  if (data.files && data.files.length > 0) return data.files[0].id;
+  const folders = data.files || [];
 
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken.value}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: APP_FOLDER_NAME,
-      mimeType: 'application/vnd.google-apps.folder',
-    }),
-  });
-  const folder = await createRes.json();
-  return folder.id;
+  // 3. Если папок несколько – выбираем самую свежую по времени изменения
+  let folderId = null;
+  if (folders.length > 0) {
+    folders.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime));
+    folderId = folders[0].id;
+  } else {
+    // 4. Если папок нет – создаём
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken.value}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: APP_FOLDER_NAME,
+        mimeType: 'application/vnd.google-apps.folder',
+      }),
+    });
+    const folder = await createRes.json();
+    folderId = folder.id;
+  }
+
+  // 5. Запоминаем выбранный ID
+  localStorage.setItem(FOLDER_ID_KEY, folderId);
+  return folderId;
 }
 
+// Теперь listWeekFiles использует getAppFolderId
 export async function listWeekFiles() {
-  const folderId = await getOrCreateFolder();
+  const folderId = await getAppFolderId();
   const query = `'${folderId}' in parents and trashed=false`;
   const res = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime)`,
     { headers: { Authorization: `Bearer ${accessToken.value}` } }
   );
   const data = await res.json();
-  return data.files || []; // теперь каждый файл содержит id, name, modifiedTime
+  return data.files || [];
 }
 
 export async function downloadFile(fileId) {
@@ -200,15 +232,14 @@ export async function downloadFile(fileId) {
 }
 
 export async function uploadFile(fileName, jsonData, existingFileId = null) {
-  const folderId = await getOrCreateFolder();
+  const folderId = await getAppFolderId(); // используем новую функцию получения папки
 
-  // Для PATCH‑запроса поле parents не включается – файл уже в папке.
   const metadata = {
     name: fileName,
     mimeType: 'application/json',
   };
   if (!existingFileId) {
-    metadata.parents = [folderId]; // только для создания нового файла
+    metadata.parents = [folderId];
   }
 
   const fileContent = new Blob([JSON.stringify(jsonData, null, 2)], {
@@ -221,13 +252,13 @@ export async function uploadFile(fileName, jsonData, existingFileId = null) {
   );
   form.append('file', fileContent);
 
-  const url = existingFileId
+  const baseUrl = existingFileId
     ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart`
     : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-  const method = existingFileId ? 'PATCH' : 'POST';
+  const url = `${baseUrl}&fields=id,name,modifiedTime`;
 
   const res = await fetch(url, {
-    method,
+    method: existingFileId ? 'PATCH' : 'POST',
     headers: { Authorization: `Bearer ${accessToken.value}` },
     body: form,
   });
@@ -237,5 +268,7 @@ export async function uploadFile(fileName, jsonData, existingFileId = null) {
       `Upload failed: ${res.status} ${JSON.stringify(errorData)}`
     );
   }
-  return await res.json();
+  const res_json = await res.json();
+  console.log(res_json);
+  return res_json;
 }

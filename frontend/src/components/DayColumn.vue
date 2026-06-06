@@ -12,7 +12,8 @@ const props = defineProps({
 const store = useTodoStore();
 const newTodoText = ref('');
 
-const todayStr = new Date().toISOString().slice(0, 10);
+const now = new Date();
+const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 const isToday = computed(() => props.date === todayStr);
 
 // Прямая ссылка на реактивный объект недели

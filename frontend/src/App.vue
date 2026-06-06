@@ -121,14 +121,13 @@ function getISOWeekNumber(d) {
         <template v-else>
           <span
             class="sync-status"
-            v-if="store.cloudSyncing.value != 'In sync'"
+            v-if="store.isInSync.value"
+            >✅ Синхронизировано</span
           >
-            ⏳ {{ store.cloudSyncing }}
-          </span>
           <span
             class="sync-status"
             v-else
-            >✅ Синхронизировано</span
+            >⏳ Синхронизация…</span
           >
           <button
             @click="handleLogout"
