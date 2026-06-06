@@ -352,16 +352,36 @@ async function syncWeek(weekKey) {
   const localParsed = localRaw ? JSON.parse(localRaw) : {};
   const merged = mergeWeekDays(localParsed, cloudData);
 
-  // Сравниваем merged с облачной версией: если идентичны, нет смысла отправлять
-  localStorage.setItem(weekKey, JSON.stringify(merged));
+  if (!dirty) {
+    console.log('not dirty, save cloudData');
+    localStorage.setItem(weekKey, JSON.stringify(cloudData));
+    loadWeek(currentMonday.value);
 
-  // Обновляем карту облачных меток в любом случае
-  const cmap = loadCloudModifiedMap();
-  cmap[weekKey] = cloudModified;
-  saveCloudModifiedMap(cmap);
+    const cmap = loadCloudModifiedMap();
+    cmap[weekKey] = cloudModified;
+    saveCloudModifiedMap(cmap);
+    return;
+  }
+
+  if (JSON.stringify(merged) == JSON.stringify(cloudData)) {
+    console.log('merged == cloudData, skip');
+    localStorage.setItem(weekKey, JSON.stringify(cloudData));
+    loadWeek(currentMonday.value);
+
+    const cmap = loadCloudModifiedMap();
+    cmap[weekKey] = cloudModified;
+    saveCloudModifiedMap(cmap);
+    return;
+  }
 
   if (JSON.stringify(merged) !== JSON.stringify(cloudData)) {
     console.log('merge files - cloud file is newer, sending merged version');
+    localStorage.setItem(weekKey, JSON.stringify(merged));
+    loadWeek(currentMonday.value);
+
+    const cmap = loadCloudModifiedMap();
+    cmap[weekKey] = cloudModified;
+    saveCloudModifiedMap(cmap);
     await pushWeekToCloud(weekKey, merged);
   } else {
     console.log(
