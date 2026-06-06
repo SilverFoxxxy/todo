@@ -365,7 +365,7 @@ async function syncWeek(weekKey) {
 
   if (JSON.stringify(merged) == JSON.stringify(cloudData)) {
     console.log('merged == cloudData, skip');
-    localStorage.setItem(weekKey, JSON.stringify(cloudData));
+    await localStorage.setItem(weekKey, JSON.stringify(cloudData));
     loadWeek(currentMonday.value);
 
     const cmap = loadCloudModifiedMap();
@@ -376,7 +376,7 @@ async function syncWeek(weekKey) {
 
   if (JSON.stringify(merged) !== JSON.stringify(cloudData)) {
     console.log('merge files - cloud file is newer, sending merged version');
-    localStorage.setItem(weekKey, JSON.stringify(merged));
+    await localStorage.setItem(weekKey, JSON.stringify(merged));
     loadWeek(currentMonday.value);
 
     const cmap = loadCloudModifiedMap();
