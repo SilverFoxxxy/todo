@@ -127,8 +127,11 @@ function getISOWeekNumber(d) {
           <span
             class="sync-status"
             v-else
-            >⏳ Синхронизация…</span
           >
+            ⏳ {{ store.cloudSyncing || 'Синхронизация' }} ({{
+              store.syncProgress.value
+            }}%)
+          </span>
           <button
             @click="handleLogout"
             class="logout-btn"

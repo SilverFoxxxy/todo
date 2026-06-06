@@ -209,6 +209,14 @@ function mergeWeekDays(localObj, cloudObj) {
 // ================= Очередь синхронизации =================
 const syncQueue = ref([]);
 const isProcessingQueue = ref(false);
+const totalSyncCount = ref(0);
+
+const syncProgress = computed(() => {
+  if (isInSync.value) return 100;
+  if (!totalSyncCount.value || totalSyncCount.value === 0) return 0;
+  const completed = totalSyncCount.value - syncQueue.value.length;
+  return Math.round((completed / totalSyncCount.value) * 100);
+});
 
 function enqueueWeek(weekKey) {
   if (!cloudEnabled.value || !isSignedIn.value) return;
@@ -345,23 +353,21 @@ async function syncWeek(weekKey) {
   const merged = mergeWeekDays(localParsed, cloudData);
 
   // Сравниваем merged с облачной версией: если идентичны, нет смысла отправлять
+  localStorage.setItem(weekKey, JSON.stringify(merged));
+
+  // Обновляем карту облачных меток в любом случае
+  const cmap = loadCloudModifiedMap();
+  cmap[weekKey] = cloudModified;
+  saveCloudModifiedMap(cmap);
+
   if (JSON.stringify(merged) !== JSON.stringify(cloudData)) {
-    localStorage.setItem(weekKey, JSON.stringify(merged));
-    const cmap = loadCloudModifiedMap();
-    cmap[weekKey] = cloudModified;
-    saveCloudModifiedMap(cmap);
     console.log('merge files - cloud file is newer, sending merged version');
     await pushWeekToCloud(weekKey, merged);
   } else {
-    // Данные не изменились, просто обновляем метку
     console.log(
-      'merge files - cloud file is newer but merged is identical, skipping upload'
+      'merge files - cloud file is newer but merged identical, skipping upload'
     );
-    const cmap = loadCloudModifiedMap();
-    cmap[weekKey] = cloudModified;
-    saveCloudModifiedMap(cmap);
-    // Если локально были изменения, но они не привели к отличиям (например, удаление задачи, которая уже была удалена в облаке),
-    // то dirty можно сбросить, так как актуальное состояние уже в облаке.
+    // Сбрасываем dirty, т.к. теперь локальная версия полностью соответствует облачной
     if (dirty) {
       clearWeekDirty(weekKey);
     }
@@ -397,6 +403,8 @@ async function collectAndEnqueueAllWeeks() {
       }
       allWeekKeys.add(weekKey);
     }
+
+    totalSyncCount.value = allWeekKeys.size;
 
     console.log('load all weeks');
     console.log(bestCloudFiles);
@@ -515,6 +523,8 @@ export function useTodoStore() {
     initCloudSync,
     enableCloudSync,
     disableCloudSync,
+    totalSyncCount,
+    syncProgress,
     isInSync,
   };
 }
