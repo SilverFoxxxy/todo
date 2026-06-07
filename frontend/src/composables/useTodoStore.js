@@ -506,7 +506,10 @@ async function initCloudSync() {
 async function enableCloudSync() {
   if (cloudEnabled.value) return;
   console.log('🔐 Запускаю процесс входа…');
-  if (!isSignedIn.value) await forceReauth();
+  if (!isSignedIn.value) {
+    // await forceReauth();
+    await signIn(); // <-- обычный signIn, prompt: 'consent' только при необходимости
+  }
   cloudEnabled.value = true;
   console.log('✅ Вход выполнен, начинаю синхронизацию');
   await collectAndEnqueueAllWeeks();

@@ -27,11 +27,11 @@ function loadTokenFromStorage() {
 }
 
 // Сохранение токена в localStorage
-function saveTokenToStorage(token, expiresIn = 3600, scope = '') {
+function saveTokenToStorage(token, expiresIn = 86400, scope = '') {
   const expiresAt = Date.now() + expiresIn * 1000;
   localStorage.setItem('google_token', token);
   localStorage.setItem('google_token_expires', expiresAt.toString());
-  localStorage.setItem('google_token_scope', scope); // <-- сохраняем scope
+  localStorage.setItem('google_token_scope', scope);
 }
 
 // Удаление токена
@@ -81,11 +81,14 @@ export function initGoogleAuth() {
         isSignedIn.value = true;
         saveTokenToStorage(
           response.access_token,
-          response.expires_in || 3600,
-          response.scope || '' // <-- сохраняем scope
+          response.expires_in || 86400,
+          response.scope || ''
         );
       }
     },
+    // включаем автоматический вход (без показа окна)
+    auto_select: true,
+    prompt: '',
   });
 }
 
