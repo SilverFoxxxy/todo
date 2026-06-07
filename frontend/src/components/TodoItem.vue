@@ -165,4 +165,15 @@ watch(
   background: #fff;
   color: #333;
 }
+
+@media (max-width: 600px) {
+  .todo-text,
+  .edit-input {
+    font-size: 0.75rem;
+  }
+  .status-select {
+    width: 1rem;
+    height: 1.5rem;
+  }
+}
 </style>

@@ -124,4 +124,13 @@ function addTodo() {
   font-weight: bold;
   /* box-shadow: 0 0 0 2px var(--color-planned); */
 }
+
+@media (max-width: 600px) {
+  .day-column {
+    font-size: 0.7rem;
+  }
+  .todo-input {
+    font-size: 0.7rem;
+  }
+}
 </style>

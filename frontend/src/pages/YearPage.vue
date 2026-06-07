@@ -227,7 +227,7 @@ const chartOptions = {
   font-size: 2.8rem;
   font-weight: 800;
   color: #333;
-  opacity: 0.08;
+  opacity: 0.15;
   pointer-events: none;
   white-space: nowrap;
   user-select: none;
@@ -237,5 +237,16 @@ const chartOptions = {
   position: relative;
   height: 150px;
   z-index: 2;
+}
+
+@media (max-width: 600px) {
+  .chart-title-overlay {
+    font-size: 1.8rem;
+  }
+  .chart-box {
+    position: relative;
+    height: 100px;
+    z-index: 2;
+  }
 }
 </style>

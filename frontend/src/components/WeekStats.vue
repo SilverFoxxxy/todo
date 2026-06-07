@@ -129,4 +129,12 @@ const chartOptions = {
   height: 260px;
   margin-bottom: 16px;
 }
+
+@media (max-width: 600px) {
+  .chart-container {
+    position: relative;
+    height: 140px;
+    margin-bottom: 16px;
+  }
+}
 </style>

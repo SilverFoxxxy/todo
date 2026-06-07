@@ -75,4 +75,10 @@ function weekLabel() {
   gap: 12px;
   overflow-x: scroll;
 }
+
+@media (max-width: 600px) {
+  .week-grid {
+    gap: 0.5rem;
+  }
+}
 </style>

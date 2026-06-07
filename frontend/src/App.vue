@@ -106,15 +106,11 @@ function getISOWeekNumber(d) {
 </script>
 
 <template>
-  <div class="app">
-    <h1>Weekly To‑Do</h1>
+  <header class="app-header">
+    <div class="header-inner">
+      <h3>To‑Do</h3>
 
-    <!-- 🔐 Авторизация Google -->
-
-    <!-- Навигация -->
-    <nav class="main-nav">
-      <router-link to="/">Неделя</router-link>
-      <router-link to="/year">Год</router-link>
+      <!-- 🔐 Авторизация Google -->
       <div class="auth-area">
         <template v-if="!isSignedIn">
           <button
@@ -128,15 +124,13 @@ function getISOWeekNumber(d) {
           <span
             class="sync-status"
             v-if="store.isInSync.value"
-            >✅ Синхронизировано</span
+            >✅ In Sync</span
           >
           <span
             class="sync-status"
             v-else
           >
-            ⏳ {{ store.cloudSyncing || 'Синхронизация' }} ({{
-              store.syncProgress.value
-            }}%)
+            ⏳ ({{ store.syncProgress.value }}%)
           </span>
           <button
             @click="handleLogout"
@@ -152,6 +146,14 @@ function getISOWeekNumber(d) {
           {{ loginError }}
         </div>
       </div>
+    </div>
+  </header>
+
+  <div class="app">
+    <!-- Навигация -->
+    <nav class="main-nav">
+      <router-link to="/">Неделя</router-link>
+      <router-link to="/year">Год</router-link>
     </nav>
 
     <!-- Основной контент -->
@@ -184,12 +186,61 @@ body {
   padding: 20px;
   background: #f5f5f5;
 }
+
+/* Шапка на всю ширину */
+.app-header {
+  width: 100%;
+  /* background: #fff; */
+  border-radius: 8px;
+  padding: 10px 0;
+  /* box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1); */
+  margin-bottom: 16px;
+}
+
+.header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  align-content: bottom;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .app {
   margin: 0 auto;
 }
 h1 {
   text-align: center;
   color: #333;
+}
+
+@media (max-width: 600px) {
+  body {
+    padding: 10px;
+  }
+  .week-grid {
+    /* grid-template-columns: 1fr; одна колонка на мобиле */
+    gap: 2px;
+  }
+  .day-column {
+    min-width: 180px;
+    min-height: auto;
+    padding: 8px;
+  }
+  .todo-input {
+    font-size: 0.8rem;
+  }
+  .add-btn {
+    padding: 2px 8px;
+    font-size: 1rem;
+  }
+  .nav-btn {
+    font-size: 1rem;
+    padding: 4px 12px;
+  }
 }
 </style>
 
@@ -218,7 +269,7 @@ h1 {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  margin-bottom: 10px;
+  width: 10rem;
 }
 .google-btn {
   background: #fff;
