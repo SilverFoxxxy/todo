@@ -211,6 +211,7 @@ body {
 
 .app {
   margin: 0 auto;
+  max-width: 1900px;
 }
 h1 {
   text-align: center;

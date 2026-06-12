@@ -113,7 +113,6 @@ const chartOptions = {
 <style scoped>
 /* Стили контейнера остаются без изменений */
 .week-stats {
-  margin-top: 32px;
   background: #fff;
   border-radius: 12px;
   padding: 16px;

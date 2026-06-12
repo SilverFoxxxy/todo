@@ -1,6 +1,6 @@
 <script setup>
 import { useTodoStore } from '../composables/useTodoStore';
-import DayColumn from './DayColumn.vue';
+import HabitsDayColumn from './HabitsDayColumn.vue';
 import { getDayName } from '../utils/dateUtils';
 
 const store = useTodoStore();
@@ -9,7 +9,7 @@ const store = useTodoStore();
 <template>
   <div class="week-scroll-wrapper">
     <div class="week-grid">
-      <DayColumn
+      <HabitsDayColumn
         v-for="date in store.weekDays.value"
         :key="date"
         :date="date"

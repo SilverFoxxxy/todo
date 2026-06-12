@@ -60,7 +60,7 @@ watch(
 
 <template>
   <div
-    class="todo-item"
+    class="item-card todo-item"
     :style="{
       '--status-color': `var(--color-${todo.status.toLowerCase().replace(' ', '-')})`,
     }"
@@ -83,7 +83,7 @@ watch(
     />
 
     <select
-      class="status-select"
+      class="item-button status-select"
       :value="todo.status"
       @change="handleStatusChange"
     >
@@ -104,20 +104,10 @@ watch(
     </select>
   </div>
 </template>
-
 <style scoped>
-/* Левая цветная полоса через переменную */
 .todo-item {
-  border-left: 4px solid color-mix(in srgb, var(--status-color) 30%, white);
-  background: color-mix(in srgb, var(--status-color) 15%, white);
-  padding: 6px 10px;
-  margin-bottom: 8px;
-  border-radius: 4px;
-  display: flex;
-  align-items: top;
   justify-content: space-between;
 }
-
 .todo-text {
   flex: 1;
   cursor: pointer;
@@ -125,55 +115,12 @@ watch(
   word-break: break-word;
   text-align: left;
 }
-
-.edit-input {
-  flex: 1;
-  padding: 2px 6px;
-  font-size: 0.9rem;
-}
-
-.status-select {
-  flex-shrink: 0;
-  margin-left: 8px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--status-color, #ccc);
-  background-color: color-mix(in srgb, var(--status-color) 30%, white);
-  /* background-color: var(--status-color, #eee); */
-  color: #fff;
-  font-size: 0.8rem;
-  width: 1rem;
-  height: 1.5rem;
-  font-weight: 600;
-  cursor: pointer;
-  appearance: none; /* убираем стрелку в некоторых браузерах, можно заменить на кастомный */
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='white' d='M6 8L1 3h10z'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
-}
-
-/* Для опции удаления можно оставить обычный цвет */
 .delete-option {
   color: #333;
   background: #fff;
 }
-
-/* Цвет текста в селекте, чтобы читался на фоне */
 .status-select option {
   background: #fff;
   color: #333;
-}
-
-@media (max-width: 600px) {
-  .todo-text,
-  .edit-input {
-    font-size: 0.75rem;
-  }
-  .status-select {
-    width: 1rem;
-    height: 1.5rem;
-  }
 }
 </style>

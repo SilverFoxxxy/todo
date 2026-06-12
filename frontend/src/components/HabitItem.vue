@@ -1,0 +1,147 @@
+<script setup>
+import { ref, computed } from 'vue';
+import { useTodoStore } from '../composables/useTodoStore';
+
+const props = defineProps({
+  habitEntry: Object,
+  date: String,
+});
+
+const store = useTodoStore();
+const def = computed(() =>
+  store.habitDefs.value.find(d => d.id === props.habitEntry.habitId)
+);
+
+const isEditingName = ref(false);
+const editedName = ref('');
+
+function startEditingName() {
+  editedName.value = def.value?.name || '';
+  isEditingName.value = true;
+}
+
+function saveName() {
+  const newName = editedName.value.trim();
+  if (newName && def.value) {
+    store.updateHabitDef(props.habitEntry.habitId, { name: newName });
+  }
+  isEditingName.value = false;
+}
+
+function cancelEditingName() {
+  isEditingName.value = false;
+}
+
+function updateValue(val) {
+  store.setHabitValue(props.date, props.habitEntry.habitId, val);
+}
+
+function handleAction(action) {
+  if (action === '__delete__') {
+    store.setHabitValue(props.date, props.habitEntry.habitId, null);
+  } else if (action === 'boolean' || action === 'number' || action === 'time') {
+    store.updateHabitDef(props.habitEntry.habitId, { type: action });
+  }
+}
+</script>
+
+<template>
+  <div
+    class="habit-item item-card"
+    :style="{ '--status-color': def?.color || '#ccc' }"
+  >
+    <div class="habit-main">
+      <span
+        v-if="!isEditingName"
+        class="habit-name"
+        @dblclick="startEditingName"
+        >{{ def?.name || '???' }}
+        <input
+          v-if="def?.type === 'number'"
+          type="number"
+          :value="habitEntry.value"
+          @input="updateValue($event.target.value)"
+          class="habit-value-input"
+          placeholder="0"
+        />
+        <input
+          v-else-if="def?.type === 'time'"
+          type="time"
+          :value="habitEntry.value"
+          @input="updateValue($event.target.value)"
+          class="habit-value-input"
+        />
+      </span>
+      <input
+        v-else
+        v-model="editedName"
+        @blur="saveName"
+        @keyup.escape="cancelEditingName"
+        @keyup.enter="saveName"
+        class="edit-input"
+        autofocus
+      />
+
+      <select
+        class="habit-actions"
+        @change="handleAction($event.target.value)"
+      >
+        <option value="">⚙️</option>
+        <option value="boolean">Да/Нет</option>
+        <option value="number">Число</option>
+        <option value="time">Время</option>
+        <option value="__delete__">🗑 Удалить</option>
+      </select>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.habit-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin-bottom: 8px;
+  border-left: 4px solid
+    color-mix(in srgb, var(--status-color, #ccc) 60%, white);
+  background: color-mix(in srgb, var(--status-color, #ccc) 30%, white);
+}
+.habit-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.habit-name {
+  flex: 1;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+.habit-actions {
+  flex-shrink: 0;
+  width: 1.2rem;
+  height: 1.2rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  text-align: center;
+  padding: 0;
+}
+.habit-value-input {
+  min-width: 6rem;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  background: transparent;
+  margin-top: 2px;
+}
+.habit-value-input:focus {
+  outline: 2px solid #4a90d9;
+  outline-offset: -1px;
+}
+</style>

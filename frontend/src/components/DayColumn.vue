@@ -41,7 +41,7 @@ function addTodo() {
       v-model="weekData[date]"
       item-key="id"
       group="todos"
-      class="todos-list"
+      class="item-list"
       ghost-class="ghost"
     >
       <template #item="{ element }">
@@ -52,16 +52,19 @@ function addTodo() {
       </template>
     </draggable>
 
-    <div class="add-todo">
+    <div
+      class="item-card add-todo-card"
+      :style="{ '--status-color': 'var(--color-planned)' }"
+    >
       <input
         v-model="newTodoText"
         @keyup.enter="addTodo"
         placeholder="Новое дело"
-        class="todo-input"
+        class="add-todo-input"
       />
       <button
         @click="addTodo"
-        class="add-btn"
+        class="add-btn item-button"
       >
         +
       </button>
@@ -71,66 +74,15 @@ function addTodo() {
 
 <style scoped>
 .day-column {
-  background: white;
-  border-radius: 8px;
-  padding: 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  min-height: 300px;
-}
-.day-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  color: #333;
-}
-.todos-list {
-  flex: 1;
-  min-height: 40px; /* чтобы зона была доступна даже при отсутствии задач */
-  margin-bottom: 12px;
-}
-.ghost {
-  opacity: 0.5;
-  background: #e2e8f0;
-  border-radius: 4px;
-}
-.add-todo {
-  display: flex;
-  gap: 6px;
-}
-.todo-input {
-  flex: 1;
-  padding: 6px 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 0.9rem;
-}
-.add-btn {
-  background: #4a90d9;
-  color: white;
-  border: none;
-  font-size: 1.2rem;
-  padding: 4px 12px;
-  border-radius: 4px;
-  cursor: pointer;
+  min-height: 550px;
 }
 .today {
-  /* background: #eef5ff;
-  outline: 4px solid #eef5ff;
-  border: px solid #eef5ff;
-  border-radius: 2px; */
   color: blue;
   font-weight: bold;
-  /* box-shadow: 0 0 0 2px var(--color-planned); */
 }
-
 @media (max-width: 600px) {
   .day-column {
-    font-size: 0.7rem;
-  }
-  .todo-input {
-    font-size: 0.7rem;
+    min-height: 350px;
   }
 }
 </style>
