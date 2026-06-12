@@ -186,7 +186,7 @@ function saveStatusOrder() {
 loadStatusOrder();
 watch(statusOrder, saveStatusOrder, { deep: true });
 
-// ---------- Облачные снимки (новый формат) ----------
+// ---------- Облачные снимки ----------
 const cloudEnabled = ref(false);
 const cloudSyncing = ref('');
 const isSyncing = ref(false);
@@ -449,7 +449,7 @@ async function syncFile(fileKey) {
     return;
   }
 
-  // Случай 2: первый запуск – нет снимка
+  // Случай 2: первый запуск – нет снимка (НЕ ЗАТИРАЕМ ОБЛАКО ПУСТЫМ ФАЙЛОМ)
   if (!snap) {
     let cloudData;
     try {
@@ -457,8 +457,23 @@ async function syncFile(fileKey) {
     } catch (e) {
       return;
     }
-    saveLocal(cloudData);
-    setCloudSnap(fileKey, cloudData, cloudModified);
+
+    // Слияние локальных и облачных данных перед созданием снимка
+    const merge = isWeekFile
+      ? (local, cloud) => mergeWeekDays(local, cloud)
+      : (local, cloud) => {
+          const arr = Array.isArray(cloud) ? [...cloud] : [];
+          for (const def of Array.isArray(local) ? local : []) {
+            const idx = arr.findIndex(d => d.id === def.id);
+            if (idx >= 0) arr[idx] = def;
+            else arr.push(def);
+          }
+          return arr;
+        };
+
+    const merged = merge(localData, cloudData);
+    saveLocal(merged);
+    setCloudSnap(fileKey, merged, cloudModified);
     if (isCurrentWeek) loadWeek(currentMonday.value);
     return;
   }
