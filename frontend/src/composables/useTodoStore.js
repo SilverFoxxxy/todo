@@ -434,7 +434,7 @@ async function syncWeek(weekKey) {
         console.log('push cause dirty, no cloud file');
         console.log('syncWeek: will push', weekKey);
 
-        await pushFileToCloud(`${weekKey}.json`, data);
+        await pushFileToCloud(weekKey, data);
       }
     }
     return;
@@ -449,7 +449,7 @@ async function syncWeek(weekKey) {
         console.log('push cause dirty, same cloud file');
         console.log('syncWeek: will push', weekKey);
 
-        await pushFileToCloud(`${weekKey}.json`, data);
+        await pushFileToCloud(weekKey, data);
       }
     }
     return;
@@ -501,7 +501,7 @@ async function syncWeek(weekKey) {
   const cmap = loadCloudModifiedMap();
   cmap[weekKey] = cloudModified;
   saveCloudModifiedMap(cmap);
-  await pushFileToCloud(`${weekKey}.json`, merged);
+  await pushFileToCloud(weekKey, merged);
   if (weekKey === getWeekKey(currentMonday.value))
     loadWeek(currentMonday.value);
 }
@@ -527,7 +527,7 @@ async function syncHabitsFile(fileName) {
 
   if (!cloudFile) {
     if (habitDefs.value.length > 0) {
-      await pushFileToCloud(fileName, habitDefs.value);
+      await pushFileToCloud(fileName.replace(/\.json$/, ''), habitDefs.value);
     }
     return;
   }
