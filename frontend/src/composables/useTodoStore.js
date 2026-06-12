@@ -247,7 +247,7 @@ function setHabitValue(dateStr, habitId, value) {
   const habits = weekData.value._habits || {};
   let dayHabits = habits[dateStr] || [];
 
-  if (value === null || value === '' || value === 0) {
+  if (value === null) {
     dayHabits = dayHabits.filter(h => h.habitId !== habitId);
   } else {
     const existing = dayHabits.find(h => h.habitId === habitId);
@@ -620,6 +620,7 @@ async function fullSync() {
 
     cloudSyncing.value = 'Синхронизация файлов…';
     await processQueue();
+    await cleanupUnusedHabitDefs();
 
     loadWeek(currentMonday.value);
   } catch (err) {

@@ -20,36 +20,6 @@ const weekLabel = computed(() => {
   const end = store.weekDays.value[6];
   return `${formatDateHeader(start)} – ${formatDateHeader(end)}`;
 });
-
-// Синхронизация скролла
-const weekViewRef = ref(null);
-const weekHabitsRef = ref(null);
-
-function syncScroll(source, target) {
-  if (source && target) {
-    target.scrollLeft = source.scrollLeft;
-  }
-}
-
-let scrollHandler1, scrollHandler2;
-
-onMounted(() => {
-  const el1 = weekViewRef.value?.$el || weekViewRef.value;
-  const el2 = weekHabitsRef.value?.$el || weekHabitsRef.value;
-  if (el1 && el2) {
-    scrollHandler1 = () => syncScroll(el1, el2);
-    scrollHandler2 = () => syncScroll(el2, el1);
-    el1.addEventListener('scroll', scrollHandler1);
-    el2.addEventListener('scroll', scrollHandler2);
-  }
-});
-
-onUnmounted(() => {
-  const el1 = weekViewRef.value?.$el || weekViewRef.value;
-  const el2 = weekHabitsRef.value?.$el || weekHabitsRef.value;
-  if (el1) el1.removeEventListener('scroll', scrollHandler1);
-  if (el2) el2.removeEventListener('scroll', scrollHandler2);
-});
 </script>
 
 <template>
@@ -70,15 +40,16 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <WeekView ref="weekViewRef" />
-    <WeekStats />
+    <div class="week-scroll-wrapper">
+      <WeekView ref="weekViewRef" />
+      <h2>Мониторинг привычек</h2>
+      <WeekHabits ref="weekHabitsRef" />
+    </div>
 
-    <h2>Мониторинг привычек</h2>
-    <WeekHabits ref="weekHabitsRef" />
     <button
       @click="showHabitEditor = true"
       class="nav-btn"
-      style="font-size: 0.9rem"
+      style="font-size: 0.9rem; margin: 15px 0"
     >
       Настроить
     </button>
@@ -87,6 +58,7 @@ onUnmounted(() => {
       v-if="showHabitEditor"
       @close="showHabitEditor = false"
     />
+    <WeekStats />
   </div>
 </template>
 

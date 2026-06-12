@@ -7,7 +7,7 @@ const store = useTodoStore();
 </script>
 
 <template>
-  <div class="week-scroll-wrapper">
+  <div>
     <div class="week-grid">
       <DayColumn
         v-for="date in store.weekDays.value"
