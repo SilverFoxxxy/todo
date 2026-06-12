@@ -13,7 +13,6 @@ const habitsList = computed({
   get: () => store.weekData.value?._habits?.[props.date] || [],
   set: val => {
     store.weekData.value._habits[props.date] = val;
-    store.markWeekDirty(getWeekKey(new Date(props.date)));
     store.enqueueFile(getWeekKey(new Date(props.date)));
   },
 });

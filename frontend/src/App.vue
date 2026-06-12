@@ -87,6 +87,16 @@ function clearAllData() {
     }
     keysToRemove.forEach(key => localStorage.removeItem(key));
 
+    // Удаляем все ключи, начинающиеся с 'todo-', 'cloud-snap-', 'habits-definitions'
+    Object.keys(localStorage)
+      .filter(
+        k =>
+          k.startsWith('todo-') ||
+          k.startsWith('cloud-snap-') ||
+          k === 'habits-definitions'
+      )
+      .forEach(k => localStorage.removeItem(k));
+
     // Удаляем также данные авторизации Google (опционально)
     localStorage.removeItem('google_token');
     localStorage.removeItem('google_token_expires');

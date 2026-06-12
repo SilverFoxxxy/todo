@@ -55,18 +55,62 @@ function loadWeek(date) {
   } else {
     weekData.value = {};
   }
+
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(d.getDate() + i);
     const dateStr = toDateStr(d);
     if (!weekData.value[dateStr]) weekData.value[dateStr] = [];
   }
-  // Не принуждаем создание _habits, компоненты должны проверять наличие
+
+  delete weekData.value._lastModified;
+  if (weekData.value._habits) {
+    for (const dateStr of Object.keys(weekData.value._habits)) {
+      if (
+        Array.isArray(weekData.value._habits[dateStr]) &&
+        weekData.value._habits[dateStr].length === 0
+      ) {
+        delete weekData.value._habits[dateStr];
+      }
+    }
+  }
+}
+
+function cleanWeekData(data) {
+  if (typeof data !== 'object' || data === null) return data;
+  const cleaned = { ...data };
+  delete cleaned._lastModified;
+  delete cleaned._modifiedTime;
+  for (const key of Object.keys(cleaned)) {
+    if (key === '_habits') continue;
+    if (Array.isArray(cleaned[key]) && cleaned[key].length === 0) {
+      delete cleaned[key];
+    }
+  }
+  if (
+    cleaned._habits &&
+    typeof cleaned._habits === 'object' &&
+    !Array.isArray(cleaned._habits)
+  ) {
+    const habits = { ...cleaned._habits };
+    for (const dateStr of Object.keys(habits)) {
+      if (Array.isArray(habits[dateStr]) && habits[dateStr].length === 0) {
+        delete habits[dateStr];
+      }
+    }
+    if (Object.keys(habits).length > 0) {
+      cleaned._habits = habits;
+    } else {
+      delete cleaned._habits;
+    }
+  }
+  return cleaned;
 }
 
 function saveWeek() {
   const key = getWeekKey(currentMonday.value);
-  localStorage.setItem(key, JSON.stringify(weekData.value));
+  const cleaned = cleanWeekData(weekData.value);
+  localStorage.setItem(key, JSON.stringify(cleaned));
 }
 watch(weekData, saveWeek, { deep: true });
 
@@ -100,7 +144,6 @@ function addTodo(dateStr, text) {
     text,
     status: 'Planned',
   });
-  markWeekDirty(getWeekKey(new Date(dateStr)));
   enqueueFile(getWeekKey(new Date(dateStr)));
 }
 
@@ -109,7 +152,6 @@ function updateTodo(dateStr, todoId, changes) {
   if (!todos) return;
   const todo = todos.find(t => t.id === todoId);
   if (todo) Object.assign(todo, changes);
-  markWeekDirty(getWeekKey(new Date(dateStr)));
   enqueueFile(getWeekKey(new Date(dateStr)));
 }
 
@@ -117,7 +159,6 @@ function deleteTodo(dateStr, todoId) {
   const todos = weekData.value[dateStr];
   if (!todos) return;
   weekData.value[dateStr] = todos.filter(t => t.id !== todoId);
-  markWeekDirty(getWeekKey(new Date(dateStr)));
   enqueueFile(getWeekKey(new Date(dateStr)));
 }
 
@@ -145,42 +186,27 @@ function saveStatusOrder() {
 loadStatusOrder();
 watch(statusOrder, saveStatusOrder, { deep: true });
 
-// ---------- Облачные метки и dirty ----------
+// ---------- Облачные снимки (новый формат) ----------
 const cloudEnabled = ref(false);
 const cloudSyncing = ref('');
 const isSyncing = ref(false);
 const driveFileIds = reactive({});
 
-function loadCloudModifiedMap() {
+function getCloudSnap(fileKey) {
+  const raw = localStorage.getItem(`cloud-snap-${fileKey}`);
+  if (!raw) return null;
   try {
-    return JSON.parse(localStorage.getItem('todo-cloud-modified') || '{}');
-  } catch {
-    return {};
-  }
-}
-function saveCloudModifiedMap(map) {
-  localStorage.setItem('todo-cloud-modified', JSON.stringify(map));
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && '_modifiedTime' in parsed) {
+      return parsed;
+    }
+  } catch {}
+  return null;
 }
 
-function loadDirtyMap() {
-  try {
-    return JSON.parse(localStorage.getItem('todo-dirty-weeks') || '{}');
-  } catch {
-    return {};
-  }
-}
-function saveDirtyMap(map) {
-  localStorage.setItem('todo-dirty-weeks', JSON.stringify(map));
-}
-function markWeekDirty(weekKey) {
-  const map = loadDirtyMap();
-  map[weekKey] = true;
-  saveDirtyMap(map);
-}
-function clearWeekDirty(weekKey) {
-  const map = loadDirtyMap();
-  delete map[weekKey];
-  saveDirtyMap(map);
+function setCloudSnap(fileKey, data, modifiedTime) {
+  const snap = { data, _modifiedTime: modifiedTime };
+  localStorage.setItem(`cloud-snap-${fileKey}`, JSON.stringify(snap));
 }
 
 // ---------- Привычки ----------
@@ -188,19 +214,31 @@ const habitDefs = ref(loadHabitDefs());
 
 function loadHabitDefs() {
   try {
-    return JSON.parse(localStorage.getItem('habits-definitions') || '[]');
-  } catch {
-    return [];
-  }
+    const raw = localStorage.getItem('habits-definitions');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (e) {}
+  return [];
 }
 function saveHabitDefs(defs) {
   localStorage.setItem('habits-definitions', JSON.stringify(defs));
 }
+let previousHabitDefsJson = JSON.stringify(habitDefs.value);
 watch(
   habitDefs,
   newVal => {
+    if (!Array.isArray(newVal)) {
+      habitDefs.value = [];
+      return;
+    }
     saveHabitDefs(newVal);
-    enqueueFile('habits-definitions');
+    const newJson = JSON.stringify(newVal);
+    if (newJson !== previousHabitDefsJson) {
+      previousHabitDefsJson = newJson;
+      enqueueFile('habits-definitions');
+    }
   },
   { deep: true }
 );
@@ -223,9 +261,7 @@ function setHabitValue(dateStr, habitId, value) {
   habits[dateStr] = dayHabits;
   weekData.value._habits = { ...habits };
 
-  const weekKey = getWeekKey(new Date(dateStr));
-  markWeekDirty(weekKey);
-  enqueueFile(weekKey);
+  enqueueFile(getWeekKey(new Date(dateStr)));
 }
 
 function getHabitValue(dateStr, habitId) {
@@ -260,6 +296,7 @@ function cleanupUnusedHabitDefs() {
   habitDefs.value = habitDefs.value.filter(d => usedIds.has(d.id));
   if (before !== habitDefs.value.length) {
     saveHabitDefs(habitDefs.value);
+    previousHabitDefsJson = JSON.stringify(habitDefs.value);
   }
 }
 
@@ -284,17 +321,14 @@ function mergeWeekDays(localObj, cloudObj) {
   return result;
 }
 
-// ---------- Очередь (последовательная) ----------
+// ---------- Очередь ----------
 const syncQueue = ref([]);
 const isProcessingQueue = ref(false);
 
 function enqueueFile(fileName) {
   if (!cloudEnabled.value || !isSignedIn.value) return;
   const baseName = fileName.replace(/\.json$/, '');
-  if (baseName.includes('NaN') || baseName === 'todo-week-unknown') {
-    console.warn('Пропускаю некорректный ключ:', baseName);
-    return;
-  }
+  if (baseName.includes('NaN') || baseName === 'todo-week-unknown') return;
   if (!syncQueue.value.includes(baseName)) {
     syncQueue.value.push(baseName);
   }
@@ -318,53 +352,67 @@ async function processQueue() {
 async function pushFileToCloud(fileKey, data) {
   if (!cloudEnabled.value || !isSignedIn.value) return null;
   const fileName = `${fileKey}.json`;
-  console.log(`☁️ Отправка ${fileName}…`);
   try {
     let existingId = driveFileIds[fileKey];
     if (existingId) {
       const result = await uploadFile(fileName, data, existingId);
-      console.log('   ✅ Обновлён существующий файл');
-      return new Date(result.modifiedTime).getTime();
+      return {
+        modifiedTime: new Date(result.modifiedTime).getTime(),
+        id: existingId,
+      };
     }
     const result = await uploadFile(fileName, data);
     if (result?.id) {
       driveFileIds[fileKey] = result.id;
-      console.log(`   ✅ Создан новый файл с ID: ${result.id}`);
-      return new Date(result.modifiedTime).getTime();
+      return {
+        modifiedTime: new Date(result.modifiedTime).getTime(),
+        id: result.id,
+      };
     }
     return null;
   } catch (e) {
-    if (e.message?.includes('403')) {
-      console.warn('   ⚠️ Нет прав на изменение файла');
-      return null;
-    }
-    console.error(`❌ Ошибка отправки ${fileName}:`, e);
+    if (e.message?.includes('403')) return null;
     throw e;
   }
 }
 
 // ---------- Универсальная синхронизация файла ----------
 async function syncFile(fileKey) {
-  const cloudModifiedMap = loadCloudModifiedMap();
-  const dirtyMap = loadDirtyMap();
-  const savedCloudModified = cloudModifiedMap[fileKey] || 0;
-
-  // Определяем тип файла
   const isWeekFile = fileKey.startsWith('todo-week-');
   const isHabitsFile = fileKey === 'habits-definitions';
 
-  let dirty = false;
-  if (isWeekFile) {
-    dirty = dirtyMap[fileKey] || false;
-  } else if (isHabitsFile) {
-    // Привычки не имеют отдельного флага dirty, они отправляются сразу при изменении.
-    // Здесь dirty всегда false, но если облачный файл изменился, мы его загрузим.
-    dirty = false;
-  } else {
-    return; // неизвестный тип файла
-  }
+  const getLocalData = () => {
+    if (isWeekFile) {
+      const raw = localStorage.getItem(fileKey);
+      return raw ? cleanWeekData(JSON.parse(raw)) : {};
+    } else {
+      return loadHabitDefs();
+    }
+  };
 
-  // Ищем облачный файл
+  const localData = getLocalData();
+  const snap = getCloudSnap(fileKey);
+  const cloudSnapData = snap ? snap.data : null;
+
+  const dirty = snap
+    ? isWeekFile
+      ? JSON.stringify(cleanWeekData(localData)) !==
+        JSON.stringify(cleanWeekData(cloudSnapData))
+      : JSON.stringify(localData) !== JSON.stringify(cloudSnapData)
+    : false;
+
+  const saveLocal = data => {
+    if (isWeekFile) {
+      localStorage.setItem(fileKey, JSON.stringify(cleanWeekData(data)));
+    } else {
+      habitDefs.value = data;
+      saveHabitDefs(data);
+    }
+  };
+
+  const isCurrentWeek =
+    isWeekFile && fileKey === getWeekKey(currentMonday.value);
+
   let cloudFile = null;
   try {
     const allFiles = await listWeekFiles();
@@ -375,114 +423,94 @@ async function syncFile(fileKey) {
         const key = match[1];
         if (key === fileKey) {
           const t = new Date(f.modifiedTime).getTime();
-          if (!cloudFile || t > new Date(cloudFile.modifiedTime).getTime()) {
+          if (!cloudFile || t > new Date(cloudFile.modifiedTime).getTime())
             cloudFile = f;
-          }
         }
       } else if (isHabitsFile && f.name === targetName) {
         cloudFile = f;
         break;
       }
     }
-  } catch (e) {
-    console.warn(`Не удалось получить облачную информацию для ${fileKey}`, e);
-  }
+  } catch (e) {}
 
   const cloudModified = cloudFile
     ? new Date(cloudFile.modifiedTime).getTime()
     : null;
+  if (cloudFile && !driveFileIds[fileKey]) driveFileIds[fileKey] = cloudFile.id;
 
-  // Запоминаем ID облачного файла для будущих обновлений
-  if (cloudFile && !driveFileIds[fileKey]) {
-    driveFileIds[fileKey] = cloudFile.id;
-  }
-
-  // Случай 1: облачного файла ещё нет
+  // Случай 1: облачного файла нет
   if (!cloudFile) {
     if (dirty) {
-      const raw = localStorage.getItem(fileKey);
-      if (raw) {
-        const data = JSON.parse(raw);
-        await pushFileToCloud(fileKey, data);
-      }
+      const result = await pushFileToCloud(fileKey, localData);
+      if (result) setCloudSnap(fileKey, localData, result.modifiedTime);
+    } else if (!snap) {
+      setCloudSnap(fileKey, localData, 0);
     }
     return;
   }
 
-  // Случай 2: облачный файл не менялся
+  // Случай 2: первый запуск – нет снимка
+  if (!snap) {
+    let cloudData;
+    try {
+      cloudData = await downloadFile(cloudFile.id);
+    } catch (e) {
+      return;
+    }
+    saveLocal(cloudData);
+    setCloudSnap(fileKey, cloudData, cloudModified);
+    if (isCurrentWeek) loadWeek(currentMonday.value);
+    return;
+  }
+
+  // Случай 3: облачный файл не менялся
+  const savedCloudModified = snap._modifiedTime || 0;
   if (cloudModified === savedCloudModified) {
     if (dirty) {
-      const raw = localStorage.getItem(fileKey);
-      if (raw) {
-        const data = JSON.parse(raw);
-        await pushFileToCloud(fileKey, data);
+      const result = await pushFileToCloud(fileKey, localData);
+      if (result) {
+        setCloudSnap(fileKey, localData, result.modifiedTime);
+        if (isCurrentWeek) loadWeek(currentMonday.value);
       }
     }
     return;
   }
 
-  // Случай 3: облачный файл изменился – загружаем и сливаем
+  // Случай 4: облачный файл изменился – слияние
   let cloudData;
   try {
     cloudData = await downloadFile(cloudFile.id);
   } catch (e) {
-    console.warn(`⚠️ Не удалось скачать ${fileKey}.json, пропускаю`);
     return;
   }
 
-  if (isWeekFile) {
-    // Логика слияния для недели
-    const localRaw = localStorage.getItem(fileKey);
-    const localParsed = localRaw ? JSON.parse(localRaw) : {};
-    const merged = mergeWeekDays(localParsed, cloudData);
+  const merge = isWeekFile
+    ? (local, cloud) => mergeWeekDays(local, cloud)
+    : (local, cloud) => {
+        const arr = Array.isArray(cloud) ? [...cloud] : [];
+        for (const def of Array.isArray(local) ? local : []) {
+          const idx = arr.findIndex(d => d.id === def.id);
+          if (idx >= 0) arr[idx] = def;
+          else arr.push(def);
+        }
+        return arr;
+      };
 
-    if (!dirty) {
-      console.log('not dirty, save cloudData');
-      localStorage.setItem(fileKey, JSON.stringify(cloudData));
-      const cmap = loadCloudModifiedMap();
-      cmap[fileKey] = cloudModified;
-      saveCloudModifiedMap(cmap);
-      if (fileKey === getWeekKey(currentMonday.value))
-        loadWeek(currentMonday.value);
-      return;
-    }
+  const merged = merge(localData, cloudData);
 
-    if (JSON.stringify(merged) === JSON.stringify(cloudData)) {
-      console.log('merged == cloudData, skip');
-      localStorage.setItem(fileKey, JSON.stringify(cloudData));
-      const cmap = loadCloudModifiedMap();
-      cmap[fileKey] = cloudModified;
-      saveCloudModifiedMap(cmap);
-      clearWeekDirty(fileKey);
-      if (fileKey === getWeekKey(currentMonday.value))
-        loadWeek(currentMonday.value);
-      return;
-    }
-
-    console.log('merge files - cloud file is newer, sending merged version');
-    localStorage.setItem(fileKey, JSON.stringify(merged));
-    const cmap = loadCloudModifiedMap();
-    cmap[fileKey] = cloudModified;
-    saveCloudModifiedMap(cmap);
-    await pushFileToCloud(fileKey, merged);
-    if (fileKey === getWeekKey(currentMonday.value))
-      loadWeek(currentMonday.value);
-  } else if (isHabitsFile) {
-    // Логика слияния для определений привычек
-    const localDefs = loadHabitDefs();
-    const merged = [...cloudData];
-    for (const localDef of localDefs) {
-      const idx = merged.findIndex(d => d.id === localDef.id);
-      if (idx >= 0) merged[idx] = localDef;
-      else merged.push(localDef);
-    }
-    habitDefs.value = merged;
-    saveHabitDefs(merged);
-
-    const cmap = loadCloudModifiedMap();
-    cmap[fileKey] = cloudModified;
-    saveCloudModifiedMap(cmap);
+  if (!dirty || JSON.stringify(merged) === JSON.stringify(cloudData)) {
+    saveLocal(cloudData);
+    setCloudSnap(fileKey, cloudData, cloudModified);
+    if (isCurrentWeek) loadWeek(currentMonday.value);
+    return;
   }
+
+  saveLocal(merged);
+  const result = await pushFileToCloud(fileKey, merged);
+  if (result) {
+    setCloudSnap(fileKey, merged, result.modifiedTime);
+  }
+  if (isCurrentWeek) loadWeek(currentMonday.value);
 }
 
 // ---------- Полная синхронизация ----------
@@ -490,20 +518,32 @@ async function fullSync() {
   if (!cloudEnabled.value || !isSignedIn.value) return;
   isSyncing.value = true;
   cloudSyncing.value = 'Полная синхронизация…';
-  console.log('🔄 Полная синхронизация…');
   try {
     const files = await listWeekFiles();
-    const cloudModifiedMap = loadCloudModifiedMap();
-    const dirtyMap = loadDirtyMap();
 
     const allFileKeys = new Set();
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key.startsWith('todo-week-')) allFileKeys.add(key);
+      if (key.startsWith('todo-week-') && !key.startsWith('cloud-snap-')) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          try {
+            const data = JSON.parse(raw);
+            const hasContent =
+              Object.keys(data).some(
+                k => k !== '_habits' && data[k]?.length > 0
+              ) ||
+              (data._habits &&
+                Object.values(data._habits).some(
+                  day => Array.isArray(day) && day.length > 0
+                ));
+            if (hasContent) allFileKeys.add(key);
+          } catch (e) {}
+        }
+      }
     }
-    if (localStorage.getItem('habits-definitions')) {
+    if (localStorage.getItem('habits-definitions'))
       allFileKeys.add('habits-definitions');
-    }
 
     const bestFiles = {};
     for (const file of files) {
@@ -513,9 +553,8 @@ async function fullSync() {
       if (match) {
         const weekKey = match[1];
         const t = new Date(file.modifiedTime).getTime();
-        if (!bestFiles[weekKey] || t > bestFiles[weekKey].time) {
+        if (!bestFiles[weekKey] || t > bestFiles[weekKey].time)
           bestFiles[weekKey] = { file, time: t };
-        }
         allFileKeys.add(weekKey);
       } else if (file.name === 'habits-definitions.json') {
         allFileKeys.add('habits-definitions');
@@ -529,11 +568,37 @@ async function fullSync() {
     for (const fileKey of allFileKeys) {
       const cloudInfo = bestFiles[fileKey];
       const cloudModified = cloudInfo ? cloudInfo.time : null;
-      const savedModified = cloudModifiedMap[fileKey] || 0;
-      const dirty =
-        fileKey === 'habits-definitions' ? false : dirtyMap[fileKey] || false;
+      const snap = getCloudSnap(fileKey);
+      const savedModified = snap ? snap._modifiedTime : 0;
 
-      if (!cloudInfo || cloudModified !== savedModified || dirty) {
+      const localData =
+        fileKey === 'habits-definitions'
+          ? loadHabitDefs()
+          : (() => {
+              const raw = localStorage.getItem(fileKey);
+              return raw ? cleanWeekData(JSON.parse(raw)) : {};
+            })();
+
+      const dirty = snap
+        ? fileKey === 'habits-definitions'
+          ? JSON.stringify(localData) !== JSON.stringify(snap.data)
+          : JSON.stringify(cleanWeekData(localData)) !==
+            JSON.stringify(cleanWeekData(snap.data))
+        : false;
+
+      if (!cloudInfo) {
+        const isEmpty =
+          fileKey === 'habits-definitions'
+            ? localData.length === 0
+            : Object.keys(localData).every(
+                k =>
+                  k === '_habits' ||
+                  (Array.isArray(localData[k]) && localData[k].length === 0)
+              );
+        if (!isEmpty) enqueueFile(fileKey);
+      } else if (!snap) {
+        enqueueFile(fileKey);
+      } else if (cloudModified !== savedModified || dirty) {
         enqueueFile(fileKey);
       }
     }
@@ -541,10 +606,8 @@ async function fullSync() {
     cloudSyncing.value = 'Синхронизация файлов…';
     await processQueue();
 
-    console.log('✅ Полная синхронизация завершена');
     loadWeek(currentMonday.value);
   } catch (err) {
-    console.error('❌ Ошибка полной синхронизации:', err);
     cloudSyncing.value = 'Ошибка синхронизации';
     setTimeout(() => {
       cloudSyncing.value = '';
@@ -558,38 +621,23 @@ async function fullSync() {
 
 // ---------- Инициализация и вход/выход ----------
 async function initCloudSync() {
-  console.log('🚀 Инициализация облачной синхронизации…');
   initGoogleAuth();
   const storedToken = localStorage.getItem('google_token');
   const expires = localStorage.getItem('google_token_expires');
-  if (storedToken && expires) {
-    const expiryTime = parseInt(expires);
-    if (Date.now() < expiryTime) {
-      accessToken.value = storedToken;
-      isSignedIn.value = true;
-      cloudEnabled.value = true;
-      await fullSync();
-      startTimers();
-      loadWeek(currentMonday.value);
-    } else {
-      console.log('⏳ Токен истёк, пробую тихий вход…');
-      const success = await trySilentLogin();
-      if (success) {
-        cloudEnabled.value = true;
-        await fullSync();
-        startTimers();
-        loadWeek(currentMonday.value);
-      }
-    }
+  if (storedToken && expires && Date.now() < parseInt(expires)) {
+    accessToken.value = storedToken;
+    isSignedIn.value = true;
+    cloudEnabled.value = true;
+    await fullSync();
+    startTimers();
+    loadWeek(currentMonday.value);
   }
 }
 
 async function enableCloudSync() {
   if (cloudEnabled.value) return;
-  console.log('🔐 Запускаю процесс входа…');
   if (!isSignedIn.value) await signIn();
   cloudEnabled.value = true;
-  console.log('✅ Вход выполнен, начинаю синхронизацию');
   await fullSync();
   startTimers();
   loadWeek(currentMonday.value);
@@ -670,7 +718,6 @@ export function useTodoStore() {
     },
     getHabitValue,
     setHabitValue,
-    markWeekDirty,
     enqueueFile,
     getWeekKey,
   };
