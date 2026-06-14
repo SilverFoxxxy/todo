@@ -291,6 +291,64 @@ function getHabitValue(dateStr, habitId) {
   return arr.find(h => h.habitId === habitId)?.value ?? null;
 }
 
+function updateHabit(date, habitId, updates) {
+  const def = habitDefs.value.find(d => d.id === habitId);
+  if (!def) return;
+
+  const { name, type } = updates;
+  const newName = name?.trim();
+
+  const nameChanged = newName && newName !== def.name;
+  const typeChanged = type && type !== def.type;
+
+  if (!nameChanged && !typeChanged) return;
+
+  const finalName = newName || def.name;
+  const finalType = type || def.type;
+
+  // Ищем существующее определение
+  const existingDef = habitDefs.value.find(
+    d =>
+      d.name.toLowerCase() === finalName.toLowerCase() && d.type === finalType
+  );
+
+  const newDefId = existingDef?.id || crypto.randomUUID();
+
+  // Обновляем привычку в неделе
+  const habits = weekData.value._habits || {};
+  const dayHabits = habits[date] || [];
+  const oldIndex = dayHabits.findIndex(h => h.habitId === habitId);
+
+  if (oldIndex !== -1) {
+    const newDayHabits = [...dayHabits];
+    newDayHabits[oldIndex] = {
+      habitId: newDefId,
+      value: dayHabits[oldIndex].value,
+    };
+
+    if (typeChanged) {
+      const defaultValue =
+        type === 'boolean' ? true : type === 'number' ? 0 : '';
+      newDayHabits[oldIndex].value = defaultValue;
+    }
+
+    weekData.value._habits = {
+      ...habits,
+      [date]: newDayHabits,
+    };
+  }
+
+  // Создаём определение (если его не было)
+  if (!existingDef) {
+    addHabitDef({
+      ...def,
+      id: newDefId,
+      name: finalName,
+      type: finalType,
+    });
+  }
+}
+
 function cleanupUnusedHabitDefs() {
   const usedIds = new Set();
 
@@ -405,6 +463,19 @@ function enqueueFile(fileName) {
   }
 }
 
+const totalFilesToSync = ref(0);
+const syncedFilesCount = ref(0);
+
+const syncProgress = computed(() => {
+  if (!cloudEnabled.value) return 100;
+
+  const total = totalFilesToSync.value + syncQueue.value.length;
+  const synced = syncedFilesCount.value;
+
+  if (total === 0) return 100;
+  return Math.round((synced / total) * 100);
+});
+
 async function processQueue() {
   if (isProcessingQueue.value || syncQueue.value.length === 0) return;
   isProcessingQueue.value = true;
@@ -414,15 +485,22 @@ async function processQueue() {
 
     // Берём текущую очередь и очищаем её
     const queueToProcess = [...syncQueue.value];
+    totalFilesToSync.value = queueToProcess.length;
+    syncedFilesCount.value = 0;
     syncQueue.value = [];
 
     // Обрабатываем пачками
     for (let i = 0; i < queueToProcess.length; i += CONCURRENT) {
       const batch = queueToProcess.slice(i, i + CONCURRENT);
       await Promise.all(batch.map(fileName => syncFile(fileName)));
+      syncedFilesCount.value += batch.length;
+      console.log(totalFilesToSync.value);
+      console.log(syncedFilesCount.value);
     }
   } finally {
     isProcessingQueue.value = false;
+    totalFilesToSync.value = 0;
+    syncedFilesCount.value = 0;
   }
 }
 
@@ -701,6 +779,8 @@ async function fullSync() {
     if (localStorage.getItem('habits-definitions'))
       allFileKeys.add('habits-definitions');
 
+    console.log(allFileKeys);
+
     const cloudFilesList = await listCloudFiles();
 
     const bestFiles = {};
@@ -811,6 +891,39 @@ function stopTimers() {
 // ---------- Экспорт ----------
 loadWeek(currentMonday.value);
 
+// ---------- Функции для привычек ----------
+function getHabitDefs() {
+  return habitDefs.value;
+}
+
+function addHabitDef(def) {
+  if (!habitDefs.value.find(d => d.id === def.id)) {
+    habitDefs.value.push(def);
+    habitDefs.value = [...habitDefs.value];
+  }
+}
+
+function updateHabitDef(id, changes) {
+  const def = habitDefs.value.find(d => d.id === id);
+  if (def) {
+    Object.assign(def, changes);
+    habitDefs.value = [...habitDefs.value];
+  }
+}
+
+function removeHabitDef(id) {
+  habitDefs.value = habitDefs.value.filter(d => d.id !== id);
+}
+
+// ---------- Computed свойства ----------
+const isInSync = computed(
+  () =>
+    cloudEnabled.value &&
+    syncQueue.value.length === 0 &&
+    !isProcessingQueue.value
+);
+
+// ---------- Return ----------
 export function useTodoStore() {
   return {
     STATUSES,
@@ -825,42 +938,20 @@ export function useTodoStore() {
     statusOrder,
     cloudEnabled,
     cloudSyncing,
-    isInSync: computed(
-      () =>
-        cloudEnabled.value &&
-        syncQueue.value.length === 0 &&
-        !isProcessingQueue.value
-    ),
-    syncProgress: computed(() => {
-      if (!cloudEnabled.value || syncQueue.value.length === 0) return 100;
-      return Math.round(
-        (1 - syncQueue.value.length / (syncQueue.value.length + 5)) * 100
-      );
-    }),
+    isInSync,
+    syncProgress,
     initCloudSync,
     enableCloudSync,
     disableCloudSync,
     // Привычки
     habitDefs,
-    getHabitDefs: () => habitDefs.value,
-    addHabitDef: def => {
-      if (!habitDefs.value.find(d => d.id === def.id)) {
-        habitDefs.value.push(def);
-        habitDefs.value = [...habitDefs.value];
-      }
-    },
-    updateHabitDef: (id, changes) => {
-      const def = habitDefs.value.find(d => d.id === id);
-      if (def) {
-        Object.assign(def, changes);
-        habitDefs.value = [...habitDefs.value];
-      }
-    },
-    removeHabitDef: id => {
-      habitDefs.value = habitDefs.value.filter(d => d.id !== id);
-    },
+    getHabitDefs,
+    addHabitDef,
+    updateHabitDef,
+    removeHabitDef,
     getHabitValue,
     setHabitValue,
+    updateHabit,
     enqueueFile,
     getWeekKey,
   };

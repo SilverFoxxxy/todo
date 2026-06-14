@@ -17,76 +17,14 @@ function startEditingName() {
   isEditingName.value = true;
 }
 
-function updateHabit(updates) {
-  if (!def.value) return;
-
-  const { name, type } = updates;
-  const newName = name?.trim();
-
-  const nameChanged = newName && newName !== def.value.name;
-  const typeChanged = type && type !== def.value.type;
-
-  if (!nameChanged && !typeChanged) return;
-
-  const finalName = newName || def.value.name;
-  const finalType = type || def.value.type;
-  // Ищем существующее определение с таким же именем и типом
-  const existingDef = store.habitDefs.value.find(
-    d =>
-      d.name.toLowerCase() === finalName.toLowerCase() && d.type === finalType
-  );
-
-  const newDefId = existingDef?.id || crypto.randomUUID();
-
-  // Получаем текущий массив привычек для этой даты
-  const habits = store.weekData.value._habits || {};
-  const dayHabits = habits[props.date] || [];
-
-  // Находим индекс старой привычки
-  const oldIndex = dayHabits.findIndex(h => h.habitId === def.value.id);
-
-  if (oldIndex !== -1) {
-    // Создаём новый массив с заменой на том же индексе
-    const newDayHabits = [...dayHabits];
-    newDayHabits[oldIndex] = {
-      habitId: newDefId,
-      value: props.habitEntry.value,
-    };
-
-    // Если тип изменился, обновляем значение
-    if (typeChanged) {
-      const defaultValue =
-        type === 'boolean' ? true : type === 'number' ? 0 : '';
-      newDayHabits[oldIndex].value = defaultValue;
-    }
-
-    // Сохраняем обратно
-    store.weekData.value._habits = {
-      ...habits,
-      [props.date]: newDayHabits,
-    };
-  }
-
-  // Создаём определение (если его не было)
-  if (!existingDef) {
-    store.addHabitDef({
-      ...def.value,
-      id: newDefId,
-      name: newName || def.value.name,
-      type: type || def.value.type,
-    });
-  }
-
-  isEditingName.value = false;
-}
-
 function saveName() {
   const newName = editedName.value.trim();
   if (!newName || !def.value) {
     isEditingName.value = false;
     return;
   }
-  updateHabit({ name: newName });
+  store.updateHabit(props.date, props.habitEntry.habitId, { name: newName });
+  isEditingName.value = false;
 }
 
 function handleAction(action) {
@@ -94,7 +32,7 @@ function handleAction(action) {
     store.setHabitValue(props.date, props.habitEntry.habitId, null);
     return;
   }
-  updateHabit({ type: action });
+  store.updateHabit(props.date, props.habitEntry.habitId, { type: action });
 }
 
 function cancelEditingName() {
