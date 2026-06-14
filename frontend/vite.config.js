@@ -40,7 +40,7 @@ export default defineConfig({
     eslintPlugin({
       include: ['src/**/*.js', 'src/**/*.vue', 'src/**/*.ts'],
       exclude: ['node_modules', 'dist'],
-      formatter: 'visualstudio',
+      formatter: 'compact',
       failOnError: false,
       failOnWarning: false,
       emitWarning: true,
