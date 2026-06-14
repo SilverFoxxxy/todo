@@ -193,6 +193,12 @@ body {
   background: #f5f5f5;
 }
 
+@media (prefers-color-scheme: dark) {
+  html {
+    filter: brightness(0.875) invert(1) hue-rotate(180deg);
+  }
+}
+
 /* Шапка на всю ширину */
 .app-header {
   width: 100%;
