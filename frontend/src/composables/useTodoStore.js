@@ -484,6 +484,7 @@ async function processQueue() {
 
     // Берём текущую очередь и очищаем её
     const queueToProcess = [...syncQueue.value];
+    console.log(queueToProcess);
     totalFilesToSync.value = queueToProcess.length;
     syncedFilesCount.value = 0;
     syncQueue.value = [];
