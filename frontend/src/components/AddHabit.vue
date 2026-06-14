@@ -9,24 +9,33 @@ const habitName = ref('');
 function addHabit() {
   const name = habitName.value.trim();
   if (!name) return;
+
   let def = store.habitDefs.value.find(
     d => d.name.toLowerCase() === name.toLowerCase()
   );
+
+  // ВРЕМЕННЫЙ ID для значения (если определения нет)
+  const tempId = def?.id || crypto.randomUUID();
+
+  // СНАЧАЛА устанавливаем значение (с временным ID)
+  store.setHabitValue(
+    props.date,
+    tempId,
+    def?.type === 'boolean' ? true : def?.type === 'number' ? 0 : ''
+  );
+
+  habitName.value = '';
+
+  // ПОТОМ создаём определение (если его не было)
   if (!def) {
     def = {
-      id: crypto.randomUUID(),
+      id: tempId,
       name,
       type: 'boolean',
       color: '#999',
     };
     store.addHabitDef(def);
   }
-  store.setHabitValue(
-    props.date,
-    def.id,
-    def.type === 'boolean' ? true : def.type === 'number' ? 0 : ''
-  );
-  habitName.value = '';
 }
 </script>
 

@@ -71,6 +71,13 @@ export function forceReauth() {
 
 // Инициализация Google Identity Services (без автоматического входа)
 export function initGoogleAuth() {
+  if (!window.google?.accounts?.id) {
+    console.warn('Google Identity Services ещё не загружены, ожидание...');
+    // Пробуем снова через 100ms
+    setTimeout(initGoogleAuth, 100);
+    return;
+  }
+
   google.accounts.id.initialize({
     client_id: CLIENT_ID,
     callback: response => {
@@ -212,7 +219,7 @@ async function getAppFolderId() {
 }
 
 // Теперь listWeekFiles использует getAppFolderId
-export async function listWeekFiles() {
+export async function listCloudFiles() {
   const folderId = await getAppFolderId();
   const query = `'${folderId}' in parents and trashed=false`;
   const res = await fetch(
@@ -221,6 +228,35 @@ export async function listWeekFiles() {
   );
   const data = await res.json();
   return data.files || [];
+}
+
+export async function getCloudFileInfo(fileKey) {
+  if (!accessToken.value) {
+    throw new Error('Не авторизован');
+  }
+
+  const folderId = await getAppFolderId();
+  const fileName = `${fileKey}.json`;
+  const query = `'${folderId}' in parents and name = '${fileName}' and trashed=false`;
+
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime)`,
+    { headers: { Authorization: `Bearer ${accessToken.value}` } }
+  );
+
+  const data = await response.json();
+  const files = data.files || [];
+
+  if (files.length === 0) {
+    return null;
+  }
+
+  // reduce возвращает файл, а не время
+  return files.reduce((latest, current) => {
+    const latestTime = new Date(latest.modifiedTime).getTime();
+    const currentTime = new Date(current.modifiedTime).getTime();
+    return currentTime > latestTime ? current : latest;
+  });
 }
 
 export async function downloadFile(fileId) {
