@@ -60,11 +60,11 @@ function updateValue(val) {
       <input
         v-else
         v-model="editedName"
+        class="edit-input edit-name-input"
+        autofocus
         @blur="saveName"
         @keyup.escape="cancelEditingName"
         @keyup.enter="saveName"
-        class="edit-input edit-name-input"
-        autofocus
       />
 
       <select
@@ -83,16 +83,16 @@ function updateValue(val) {
       v-if="def?.type === 'number'"
       type="number"
       :value="habitEntry.value"
-      @input="updateValue($event.target.value)"
       class="habit-value-input"
       placeholder="0"
+      @input="updateValue($event.target.value)"
     />
     <input
       v-else-if="def?.type === 'time'"
       type="time"
       :value="habitEntry.value"
-      @input="updateValue($event.target.value)"
       class="habit-value-input"
+      @input="updateValue($event.target.value)"
     />
   </div>
 </template>

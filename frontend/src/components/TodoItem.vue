@@ -75,11 +75,11 @@ watch(
     <input
       v-else
       v-model="editedText"
+      class="edit-input"
+      autofocus
       @blur="saveText"
       @keyup.escape="cancelEditing"
       @keyup.enter="saveText"
-      class="edit-input"
-      autofocus
     />
 
     <select

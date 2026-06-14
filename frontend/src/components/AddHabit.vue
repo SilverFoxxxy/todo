@@ -47,9 +47,9 @@ function addHabit() {
     <input
       v-model="habitName"
       list="habit-list"
-      @keyup.enter="addHabit"
       placeholder="Новая привычка…"
       class="add-todo-input"
+      @keyup.enter="addHabit"
     />
     <datalist id="habit-list">
       <option
@@ -59,8 +59,8 @@ function addHabit() {
       />
     </datalist>
     <button
-      @click="addHabit"
       class="add-btn item-button"
+      @click="addHabit"
     >
       +
     </button>

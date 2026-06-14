@@ -56,7 +56,9 @@ const yearData = computed(() => {
           const y = parseInt(dateStr.slice(0, 4));
           if (y === year.value) data[dateStr] = todos;
         });
-      } catch (e) {}
+      } catch (e) {
+        console.error('yearData = computed error:', e);
+      }
     }
   }
   return data;
@@ -154,15 +156,15 @@ const chartOptions = {
   <div class="year-page">
     <div class="year-controls">
       <button
-        @click="prevYear"
         class="nav-btn"
+        @click="prevYear"
       >
         ←
       </button>
       <span class="year-label">{{ year }}</span>
       <button
-        @click="nextYear"
         class="nav-btn"
+        @click="nextYear"
       >
         →
       </button>

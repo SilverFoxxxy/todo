@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import { useTodoStore } from '../composables/useTodoStore';
 import WeekView from '../components/WeekView.vue';
 import WeekStats from '../components/WeekStats.vue';
@@ -26,15 +26,15 @@ const weekLabel = computed(() => {
   <div class="week-page">
     <div class="week-controls">
       <button
-        @click="store.shiftWeek(-1)"
         class="nav-btn"
+        @click="store.shiftWeek(-1)"
       >
         ←
       </button>
       <span class="week-label">{{ weekLabel }}</span>
       <button
-        @click="store.shiftWeek(1)"
         class="nav-btn"
+        @click="store.shiftWeek(1)"
       >
         →
       </button>
@@ -47,9 +47,9 @@ const weekLabel = computed(() => {
     </div>
 
     <button
-      @click="showHabitEditor = true"
       class="nav-btn"
       style="font-size: 0.9rem; margin: 15px 0"
+      @click="showHabitEditor = true"
     >
       Настроить
     </button>

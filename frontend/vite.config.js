@@ -1,8 +1,13 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
+import eslintPlugin from 'vite-plugin-eslint';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 
-// https://vite.dev/config/
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -31,6 +36,15 @@ export default defineConfig({
           },
         ],
       },
+    }),
+    eslintPlugin({
+      include: ['src/**/*.js', 'src/**/*.vue', 'src/**/*.ts'],
+      exclude: ['node_modules', 'dist'],
+      formatter: 'visualstudio',
+      failOnError: false,
+      failOnWarning: false,
+      emitWarning: true,
+      emitError: true,
     }),
   ],
   base: '/todo/',

@@ -1,9 +1,9 @@
 // src/composables/useGoogleDrive.js
-import { ref, reactive } from 'vue';
+import { ref } from 'vue';
 
 const CLIENT_ID =
   '1042270247553-2767biib6g182ds08uhca6n75dbalfuf.apps.googleusercontent.com';
-const API_KEY = 'ВАШ_API_KEY';
+// const API_KEY = 'ВАШ_API_KEY';
 const APP_FOLDER_NAME = 'weekly-todo';
 
 export const isSignedIn = ref(false);
@@ -177,7 +177,9 @@ async function getAppFolderId() {
         { headers: { Authorization: `Bearer ${accessToken.value}` } }
       );
       if (res.ok) return storedId; // папка существует
-    } catch (e) {}
+    } catch (e) {
+      console.error('getAppFolderId error: ', e);
+    }
     // Если папка не найдена, удаляем сохранённый ID
     localStorage.removeItem(FOLDER_ID_KEY);
   }

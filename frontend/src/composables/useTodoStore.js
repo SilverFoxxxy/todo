@@ -3,22 +3,14 @@ import {
   isSignedIn,
   signIn,
   signOut,
-  trySilentLogin,
   initGoogleAuth,
   getCloudFileInfo,
   listCloudFiles,
   downloadFile,
   uploadFile,
   accessToken,
-  forceReauth,
-  clearTokenStorage,
 } from './useGoogleDrive';
-import {
-  getMonday,
-  getWeekKey,
-  toDateStr,
-  getDayName,
-} from '../utils/dateUtils';
+import { getMonday, getWeekKey, toDateStr } from '../utils/dateUtils';
 
 // ---------- Вспомогательные функции ----------
 const STATUSES = ['Planned', 'Postponed', 'Done', 'Cancelled', 'Caught Up'];
@@ -34,7 +26,8 @@ function loadWeek(date) {
   if (raw) {
     try {
       weekData.value = JSON.parse(raw);
-    } catch {
+    } catch (e) {
+      console.error('Ошибка парсинга недели:', e);
       weekData.value = {};
     }
   } else {
@@ -195,7 +188,9 @@ function loadStatusOrder() {
       ) {
         statusOrder.value = parsed;
       }
-    } catch {}
+    } catch (e) {
+      console.error('Ошибка парсинга статусов:', e);
+    }
   }
 }
 function saveStatusOrder() {
@@ -219,7 +214,9 @@ function getCloudSnap(fileKey) {
     if (parsed && typeof parsed === 'object' && '_modifiedTime' in parsed) {
       return parsed;
     }
-  } catch {}
+  } catch (e) {
+    console.error('getCloudSnap error:', e);
+  }
   return null;
 }
 
@@ -239,9 +236,12 @@ function loadHabitDefs() {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed : [];
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Ошибка парсинга снимка:', e);
+  }
   return [];
 }
+
 function saveHabitDefs(defs) {
   localStorage.setItem('habits-definitions', JSON.stringify(defs));
 }
@@ -367,7 +367,7 @@ function cleanupUnusedHabitDefs() {
         }
       }
     } catch (e) {
-      // игнорируем ошибки парсинга
+      console.error(`Ошибка при очистке ${key}`, e);
     }
   }
 
@@ -497,6 +497,8 @@ async function processQueue() {
       console.log(totalFilesToSync.value);
       console.log(syncedFilesCount.value);
     }
+  } catch (err) {
+    console.error('Ошибка в processQueue:', err);
   } finally {
     isProcessingQueue.value = false;
     totalFilesToSync.value = 0;
@@ -537,31 +539,25 @@ async function pushFileToCloud(fileKey, data, existingFileId = null) {
   }
 }
 
-function mergeHabitDefs(localDefs, cloudDefs) {
-  const local = Array.isArray(localDefs) ? localDefs : [];
-  const cloud = Array.isArray(cloudDefs) ? cloudDefs : [];
-  const merged = [...cloud];
-  for (const def of local) {
-    const idx = merged.findIndex(d => d.id === def.id);
-    if (idx >= 0)
-      merged[idx] = def; // локальное перезаписывает облачное
-    else merged.push(def);
-  }
-  return merged;
-}
-
 // Единая функция загрузки локальных данных
 function loadLocalData(fileKey) {
+  const raw = localStorage.getItem(fileKey);
+  if (!raw) return {};
+
+  let parsed;
   try {
-    const raw = localStorage.getItem(fileKey);
-
-    if (!raw) {
-      return {};
-    }
-
-    return cleanFile(JSON.parse(raw)) || {};
+    parsed = JSON.parse(raw);
   } catch (e) {
-    console.error(`Ошибка loadLocalData ${fileKey}`, e);
+    console.error(`Ошибка JSON.parse для ${fileKey}:`, e);
+    localStorage.removeItem(fileKey);
+    return {};
+  }
+
+  try {
+    const cleaned = cleanFile(parsed);
+    return cleaned ?? {};
+  } catch (e) {
+    console.error(`Ошибка cleanFile для ${fileKey}:`, e);
     return {};
   }
 }

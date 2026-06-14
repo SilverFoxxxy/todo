@@ -58,13 +58,13 @@ function addTodo() {
     >
       <input
         v-model="newTodoText"
-        @keyup.enter="addTodo"
         placeholder="Новое дело"
         class="add-todo-input"
+        @keyup.enter="addTodo"
       />
       <button
-        @click="addTodo"
         class="add-btn item-button"
+        @click="addTodo"
       >
         +
       </button>

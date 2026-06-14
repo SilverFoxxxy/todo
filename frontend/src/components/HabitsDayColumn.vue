@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { computed } from 'vue';
 import { useTodoStore } from '../composables/useTodoStore';
 import { getWeekKey } from '../utils/dateUtils';
 import draggable from 'vuedraggable';
@@ -34,7 +34,7 @@ const habitsList = computed({
     >
       <template #item="{ element }">
         <HabitItem
-          :habitEntry="element"
+          :habit-entry="element"
           :date="date"
         />
       </template>

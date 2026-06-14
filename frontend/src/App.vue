@@ -1,15 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useTodoStore } from './composables/useTodoStore';
-import {
-  isSignedIn,
-  initGoogleAuth,
-  signIn,
-  signOut,
-} from './composables/useGoogleDrive';
+import { isSignedIn } from './composables/useGoogleDrive';
 
 const store = useTodoStore();
-const fileInput = ref(null);
 const loginError = ref('');
 
 // === Google Auth ===
@@ -51,7 +45,9 @@ function importJSON(event) {
         if (existing) {
           try {
             week = JSON.parse(existing);
-          } catch (e) {}
+          } catch (e) {
+            console.error('import json parse error:', e);
+          }
         }
         if (!week[dateStr]) week[dateStr] = [];
 
@@ -124,27 +120,27 @@ function getISOWeekNumber(d) {
       <div class="auth-area">
         <template v-if="!isSignedIn">
           <button
-            @click="handleLogin"
             class="google-btn"
+            @click="handleLogin"
           >
             Войти через Google
           </button>
         </template>
         <template v-else>
           <span
-            class="sync-status"
             v-if="store.isInSync.value"
+            class="sync-status"
             >✅ In Sync</span
           >
           <span
-            class="sync-status"
             v-else
+            class="sync-status"
           >
             ⏳ ({{ store.syncProgress.value }}%)
           </span>
           <button
-            @click="handleLogout"
             class="logout-btn"
+            @click="handleLogout"
           >
             Выйти
           </button>
@@ -180,8 +176,8 @@ function getISOWeekNumber(d) {
     </div>
     <div style="text-align: center; margin: 10px 0">
       <button
-        @click="clearAllData"
         class="danger-btn"
+        @click="clearAllData"
       >
         🗑 Сбросить все данные
       </button>

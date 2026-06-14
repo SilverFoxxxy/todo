@@ -91,8 +91,8 @@ function remove(id) {
         </div>
         <button
           v-if="!editingDef"
-          @click="openNew"
           class="add-btn-primary"
+          @click="openNew"
         >
           + Добавить привычку
         </button>
@@ -100,8 +100,8 @@ function remove(id) {
 
       <form
         v-if="editingDef !== undefined"
-        @submit.prevent="save"
         class="edit-form"
+        @submit.prevent="save"
       >
         <label>Название</label>
         <input
@@ -172,8 +172,8 @@ function remove(id) {
       </form>
 
       <button
-        @click="emit('close')"
         class="close-btn"
+        @click="emit('close')"
       >
         Закрыть
       </button>
