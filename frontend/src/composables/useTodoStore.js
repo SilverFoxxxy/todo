@@ -162,7 +162,7 @@ function addTodo(dateStr, text) {
     text,
     status: 'Planned',
   });
-  enqueueFile(getWeekKey(new Date(dateStr)));
+  fullSync();
 }
 
 function updateTodo(dateStr, todoId, changes) {
@@ -170,14 +170,14 @@ function updateTodo(dateStr, todoId, changes) {
   if (!todos) return;
   const todo = todos.find(t => t.id === todoId);
   if (todo) Object.assign(todo, changes);
-  enqueueFile(getWeekKey(new Date(dateStr)));
+  fullSync();
 }
 
 function deleteTodo(dateStr, todoId) {
   const todos = weekData.value[dateStr];
   if (!todos) return;
   weekData.value[dateStr] = todos.filter(t => t.id !== todoId);
-  enqueueFile(getWeekKey(new Date(dateStr)));
+  fullSync();
 }
 
 // ---------- Статусы ----------
@@ -283,7 +283,7 @@ function setHabitValue(dateStr, habitId, value) {
   habits[dateStr] = dayHabits;
   weekData.value._habits = { ...habits };
 
-  enqueueFile(getWeekKey(new Date(dateStr)));
+  fullSync();
 }
 
 function getHabitValue(dateStr, habitId) {
@@ -484,7 +484,7 @@ async function processQueue() {
 
     // Берём текущую очередь и очищаем её
     const queueToProcess = [...syncQueue.value];
-    console.log(queueToProcess);
+    console.log('queue:', queueToProcess);
     totalFilesToSync.value = queueToProcess.length;
     syncedFilesCount.value = 0;
     syncQueue.value = [];
@@ -552,13 +552,18 @@ function mergeHabitDefs(localDefs, cloudDefs) {
 
 // Единая функция загрузки локальных данных
 function loadLocalData(fileKey) {
-  const raw = localStorage.getItem(fileKey);
+  try {
+    const raw = localStorage.getItem(fileKey);
 
-  if (!raw) {
+    if (!raw) {
+      return {};
+    }
+
+    return cleanFile(JSON.parse(raw)) || {};
+  } catch (e) {
+    console.error(`Ошибка loadLocalData ${fileKey}`, e);
     return {};
   }
-
-  return cleanFile(JSON.parse(raw));
 }
 
 // Единая функция сохранения локальных данных
@@ -642,6 +647,7 @@ async function syncFile(fileKey) {
       : Object.keys(localData).length,
     localData,
     snap,
+    cloudData,
   });
 
   const strategy = determineSyncStrategy({
@@ -750,29 +756,35 @@ function isDirty(localData, snapData) {
 
 // ---------- Полная синхронизация ----------
 async function fullSync() {
-  cleanupUnusedHabitDefs();
-  if (!cloudEnabled.value || !isSignedIn.value || isSyncing.value) return;
-  isSyncing.value = true;
-  cloudSyncing.value = 'Полная синхронизация…';
   try {
+    cleanupUnusedHabitDefs();
+    console.log(
+      'try full Sync',
+      cloudEnabled.value,
+      isSignedIn.value,
+      isSyncing.value
+    );
+    if (!cloudEnabled.value || !isSignedIn.value || isSyncing.value) return;
+    isSyncing.value = true;
+    cloudSyncing.value = 'Полная синхронизация…';
     const allFileKeys = new Set();
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key.startsWith('todo-week-') && !key.startsWith('cloud-snap-')) {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          try {
-            const data = JSON.parse(raw);
-            const hasContent =
-              Object.keys(data).some(
-                k => k !== '_habits' && data[k]?.length > 0
-              ) ||
-              (data._habits &&
-                Object.values(data._habits).some(
-                  day => Array.isArray(day) && day.length > 0
-                ));
-            if (hasContent) allFileKeys.add(key);
-          } catch (e) {}
+        try {
+          const data = loadLocalData(key);
+          if (!data) continue;
+          const hasContent =
+            Object.keys(data).some(
+              k => k !== '_habits' && data[k]?.length > 0
+            ) ||
+            (data._habits &&
+              Object.values(data._habits).some(
+                day => Array.isArray(day) && day.length > 0
+              ));
+          if (hasContent) allFileKeys.add(key);
+        } catch (e) {
+          console.error('Ошибка при загрузке недели:', e);
         }
       }
     }
@@ -782,6 +794,8 @@ async function fullSync() {
     console.log(allFileKeys);
 
     const cloudFilesList = await listCloudFiles();
+
+    console.log(cloudFilesList);
 
     const bestFiles = {};
     for (const file of cloudFilesList) {
@@ -804,6 +818,8 @@ async function fullSync() {
       allFileKeys.add(fileKey);
     }
 
+    console.log('all keys', allFileKeys);
+
     // Основной цикл синхронизации
     for (const fileKey of allFileKeys) {
       const cloudInfo = bestFiles[fileKey];
@@ -812,7 +828,7 @@ async function fullSync() {
       const savedModified = snap ? snap._modifiedTime : 0;
 
       const localData = loadLocalData(fileKey);
-      const isEmptyLocal = Object.keys(localData).length === 0;
+      const isEmptyLocal = !localData || Object.keys(localData).length === 0;
       const isLocalDirty = snap ? isDirty(localData, snap.data) : !isEmptyLocal;
 
       const strategy = determineSyncStrategy({
@@ -831,6 +847,7 @@ async function fullSync() {
     cloudSyncing.value = 'Синхронизация файлов…';
     await processQueue();
   } catch (err) {
+    console.error('Ошибка в fullSync:', err);
     cloudSyncing.value = 'Ошибка синхронизации';
     setTimeout(() => {
       cloudSyncing.value = '';
@@ -952,7 +969,6 @@ export function useTodoStore() {
     getHabitValue,
     setHabitValue,
     updateHabit,
-    enqueueFile,
     getWeekKey,
   };
 }
