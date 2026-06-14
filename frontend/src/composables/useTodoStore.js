@@ -493,7 +493,6 @@ async function processQueue() {
     for (let i = 0; i < queueToProcess.length; i += CONCURRENT) {
       const batch = queueToProcess.slice(i, i + CONCURRENT);
       await Promise.all(batch.map(fileName => syncFile(fileName)));
-      syncedFilesCount.value += batch.length;
       console.log(totalFilesToSync.value);
       console.log(syncedFilesCount.value);
     }
@@ -594,111 +593,112 @@ function mergeData(fileKey, localData, cloudData) {
   return merged;
 }
 
-// Проверка, нужно ли обновлять локальные данные
-function shouldUpdateLocal(mergedData, cloudData) {
-  return JSON.stringify(mergedData) === JSON.stringify(cloudData);
-}
-
 async function syncFile(fileKey) {
-  const isWeekFile = fileKey.startsWith('todo-week-');
-  const isCurrentWeek =
-    isWeekFile && fileKey === getWeekKey(currentMonday.value);
+  try {
+    console.log(`🔄 Синхронизация: ${fileKey}`);
 
-  console.log(`🔄 Синхронизация: ${fileKey}`);
+    // 1. Получаем актуальный облачный файл (информация + содержимое)
+    const cloudFileInfo = await getCloudFileInfo(fileKey);
+    let cloudData = null;
+    let cloudModified = null;
 
-  // 1. Получаем актуальный облачный файл (информация + содержимое)
-  const cloudFileInfo = await getCloudFileInfo(fileKey);
-  let cloudData = null;
-  let cloudModified = null;
-
-  if (cloudFileInfo) {
-    try {
-      cloudData = await downloadFile(cloudFileInfo.id);
-      cloudData = cleanFile(cloudData);
-      cloudModified = new Date(cloudFileInfo.modifiedTime).getTime();
-    } catch (error) {
-      console.warn(`   ⚠️ Не удалось скачать ${fileKey}.json`, error);
-      return;
+    if (cloudFileInfo) {
+      try {
+        cloudData = await downloadFile(cloudFileInfo.id);
+        cloudData = cleanFile(cloudData);
+        cloudModified = new Date(cloudFileInfo.modifiedTime).getTime();
+      } catch (error) {
+        console.warn(`   ⚠️ Не удалось скачать ${fileKey}.json`, error);
+        return;
+      }
     }
-  }
 
-  // 2. Загружаем локальные данные (синхронно)
-  const localData = loadLocalData(fileKey);
-  const snap = getCloudSnap(fileKey);
-  const savedModified = snap?._modifiedTime ?? 0;
-  const isLocalDirty = snap
-    ? isDirty(localData, snap.data)
-    : Object.keys(localData).length > 0;
+    // 2. Загружаем локальные данные (синхронно)
+    const localData = loadLocalData(fileKey);
+    const snap = getCloudSnap(fileKey);
+    const savedModified = snap?._modifiedTime ?? 0;
+    const isLocalDirty = snap
+      ? isDirty(localData, snap.data)
+      : Object.keys(localData).length > 0;
 
-  // 3. Определяем стратегию
-  const hasCloudFile = !!cloudFileInfo;
+    // 3. Определяем стратегию
+    const hasCloudFile = !!cloudFileInfo;
 
-  console.log(`   Параметры для стратегии:`, {
-    hasCloudFile,
-    cloudModified,
-    savedModified,
-    isLocalDirty,
-    localDataLength: Array.isArray(localData)
-      ? localData.length
-      : Object.keys(localData).length,
-    localData,
-    snap,
-    cloudData,
-  });
+    console.log(`   Параметры для стратегии:`, {
+      hasCloudFile,
+      cloudModified,
+      savedModified,
+      isLocalDirty,
+      localDataLength: Array.isArray(localData)
+        ? localData.length
+        : Object.keys(localData).length,
+      localData,
+      snap,
+      cloudData,
+    });
 
-  const strategy = determineSyncStrategy({
-    hasCloudFile,
-    cloudModified,
-    savedModified,
-    isLocalDirty,
-  });
+    const strategy = determineSyncStrategy({
+      hasCloudFile,
+      cloudModified,
+      savedModified,
+      isLocalDirty,
+    });
 
-  console.log(`   Стратегия: ${strategy.type}`);
+    console.log(`   Стратегия: ${strategy.type}`);
 
-  // 4. Выполняем стратегию
-  if (strategy.type === STRATEGY.UPLOAD) {
-    // Только загрузка в облако (локальные данные уже актуальны)
-    const result = await pushFileToCloud(fileKey, localData, cloudFileInfo?.id);
-    if (result) {
-      console.log(
-        `   ✅ Обновляем снимок: modifiedTime = ${result.modifiedTime}`
+    // 4. Выполняем стратегию
+    if (strategy.type === STRATEGY.UPLOAD) {
+      // Только загрузка в облако (локальные данные уже актуальны)
+      const result = await pushFileToCloud(
+        fileKey,
+        localData,
+        cloudFileInfo?.id
       );
-      setCloudSnap(fileKey, localData, result.modifiedTime);
-    } else {
-      console.log(`   ⚠️ Ошибка загрузки, снимок НЕ обновлён`);
+      if (result) {
+        console.log(
+          `   ✅ Обновляем снимок: modifiedTime = ${result.modifiedTime}`
+        );
+        setCloudSnap(fileKey, localData, result.modifiedTime);
+      } else {
+        console.log(`   ⚠️ Ошибка загрузки, снимок НЕ обновлён`);
+      }
+    } else if (strategy.type === STRATEGY.DOWNLOAD) {
+      // Просто заменяем локальные данные облачными
+      saveLocalData(fileKey, cloudData);
+      setCloudSnap(fileKey, cloudData, cloudModified);
+
+      loadWeek(currentMonday.value);
+    } else if (strategy.type === STRATEGY.MERGE_AND_UPLOAD) {
+      // Слияние: объединяем локальные и облачные данные
+      const mergedData = mergeData(fileKey, localData, cloudData);
+      const cleanedMergedData = cleanFile(mergedData);
+
+      console.dir(localData);
+      console.dir(cloudData);
+      console.dir(cleanedMergedData);
+
+      // Сохраняем локально результат слияния
+      saveLocalData(fileKey, cleanedMergedData);
+
+      // Загружаем в облако
+      const result = await pushFileToCloud(
+        fileKey,
+        cleanedMergedData,
+        cloudFileInfo?.id
+      );
+      if (result) {
+        setCloudSnap(fileKey, cleanedMergedData, result.modifiedTime);
+      }
+
+      loadWeek(currentMonday.value);
     }
-  } else if (strategy.type === STRATEGY.DOWNLOAD) {
-    // Просто заменяем локальные данные облачными
-    saveLocalData(fileKey, cloudData);
-    setCloudSnap(fileKey, cloudData, cloudModified);
 
-    loadWeek(currentMonday.value);
-  } else if (strategy.type === STRATEGY.MERGE_AND_UPLOAD) {
-    // Слияние: объединяем локальные и облачные данные
-    const mergedData = mergeData(fileKey, localData, cloudData);
-    const cleanedMergedData = cleanFile(mergedData);
-
-    console.dir(localData);
-    console.dir(cloudData);
-    console.dir(cleanedMergedData);
-
-    // Сохраняем локально результат слияния
-    saveLocalData(fileKey, cleanedMergedData);
-
-    // Загружаем в облако
-    const result = await pushFileToCloud(
-      fileKey,
-      cleanedMergedData,
-      cloudFileInfo?.id
-    );
-    if (result) {
-      setCloudSnap(fileKey, cleanedMergedData, result.modifiedTime);
-    }
-
-    loadWeek(currentMonday.value);
+    // STRATEGY.NO_ACTION - ничего не делаем
+  } catch (e) {
+    console.error('syncFile error:', e);
+  } finally {
+    syncedFilesCount.value += 1;
   }
-
-  // STRATEGY.NO_ACTION - ничего не делаем
 }
 
 // Стратегии синхронизации
