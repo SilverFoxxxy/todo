@@ -386,7 +386,6 @@ function cleanupUnusedHabitDefs() {
 
     habitDefs.value = filtered;
     saveHabitDefs(filtered);
-    previousHabitDefsJson = JSON.stringify(filtered);
   }
 
   return removedCount;
